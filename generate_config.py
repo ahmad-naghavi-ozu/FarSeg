@@ -409,7 +409,7 @@ def main():
     print(f"Configuration files generated:")
     print(f"  Python config: {config_py_path}")
     print(f"  JSON config: {config_json_path}")
-    print(f"\\nTo use this configuration:")
+    print(f"\nTo use this configuration:")
     print(f"  python apex_train.py --config_path {config_py_path}")
 
 

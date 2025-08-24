@@ -260,7 +260,7 @@ def train_model(config_path, model_dir, gpu_ids="0"):
             # Console logging every log_interval steps
             if global_step % log_interval == 0 and global_step > 0:
                 elapsed = time.time() - start_time
-                print(f"\\nStep {global_step:6d}/{max_iters} | "
+                print(f"\nStep {global_step:6d}/{max_iters} | "
                       f"Epoch {epoch:3d} | "
                       f"Loss: {total_loss.item():.4f} | "
                       f"LR: {current_lr:.6f} | "
@@ -285,11 +285,11 @@ def train_model(config_path, model_dir, gpu_ids="0"):
                     'epoch': epoch,
                     'config': config
                 }, checkpoint_path)
-                print(f"\\n✅ Checkpoint saved: {checkpoint_path}")
+                print(f"\n✅ Checkpoint saved: {checkpoint_path}")
             
             global_step += 1
         
-        print(f"\\nEpoch {epoch} completed")
+        print(f"\nEpoch {epoch} completed")
     
     # Close progress bar
     pbar.close()
@@ -314,7 +314,7 @@ def train_model(config_path, model_dir, gpu_ids="0"):
     }, final_path)
     
     total_time = time.time() - start_time
-    print(f"\\n🎉 Training completed!")
+    print(f"\n🎉 Training completed!")
     print(f"Total time: {total_time:.1f}s")
     print(f"Final model saved: {final_path}")
 

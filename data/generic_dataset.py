@@ -72,7 +72,8 @@ class GenericRemoveColorMap(object):
         
         # Ensure mask values are within expected range
         unique_values = np.unique(mask)
-        print(f"Unique mask values found: {unique_values}")
+        # Debug: uncomment the line below if you need to check mask values
+        # print(f"Unique mask values found: {unique_values}")
         
         return image, Image.fromarray(mask.astype(np.uint8, copy=False))
 

@@ -216,7 +216,7 @@ def main():
     
     # Check data paths
     if not check_data_paths(args.config):
-        print("\\n⚠️  Some data paths are missing. Please check your dataset setup.")
+        print("\n⚠️  Some data paths are missing. Please check your dataset setup.")
         if not args.validate_config:
             response = input("Continue anyway? (y/N): ")
             if response.lower() != 'y':
@@ -224,7 +224,7 @@ def main():
     
     # If only validating, exit here
     if args.validate_config:
-        print("\\n✅ Configuration and data path validation completed.")
+        print("\n✅ Configuration and data path validation completed.")
         return 0
     
     try:
