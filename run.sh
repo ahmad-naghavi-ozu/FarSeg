@@ -13,10 +13,10 @@ set -e  # Exit on any error
 #===============================================================================
 
 # Dataset Configuration
-DATASET_NAME="your_dataset_name"              # Name of your dataset
-DATASET_PATH="/path/to/your/datasets"          # Root path to datasets directory
-NUM_CLASSES=5                                   # Number of classes in your dataset
-CLASS_VALUES="0,1,2,3,4"                      # Comma-separated class values
+DATASET_NAME="DFC2023S"              # Name of your dataset
+DATASET_PATH="/home/asfand/Ahmad/datasets/"          # Root path to datasets directory
+NUM_CLASSES=2                                   # Number of classes in your dataset
+CLASS_VALUES="0,1"                      # Comma-separated class values
 
 # Model Configuration  
 MODEL_TYPE="farseg"                            # Model type: "farseg" or "farsegpp"
@@ -25,13 +25,13 @@ BACKBONE="resnet50"                            # Backbone: "resnet50", "mit_b2",
 # Training Parameters
 PATCH_SIZE=896                                 # Input patch size
 STRIDE=512                                     # Patch stride for training
-BATCH_SIZE_TRAIN=4                            # Training batch size
+BATCH_SIZE_TRAIN=2                            # Training batch size (reduced for single GPU)
 BATCH_SIZE_VAL=1                              # Validation batch size
 BASE_LR=0.007                                  # Base learning rate
 MAX_ITERS=60000                               # Maximum training iterations
 
 # Hardware Configuration
-GPU_IDS="0,1"                                  # GPU IDs to use (e.g., "0,1,2,3")
+GPU_IDS="2"                                  # GPU IDs to use (switching to GPU 3 to avoid memory conflicts)
 NUM_WORKERS=4                                  # Number of data loading workers
 
 # File Extensions (auto-detection if not specified)
@@ -44,9 +44,9 @@ ANALYSIS_DIR="./analysis"                     # Directory to save analysis resul
 CONFIG_DIR="./configs"                        # Directory for generated configs
 
 # Pipeline Control Flags
-RUN_ANALYSIS=true                             # Run dataset analysis
-RUN_CONFIG_GEN=true                          # Generate configuration files
-RUN_VALIDATION=true                          # Validate configuration before training
+RUN_ANALYSIS=false                             # Run dataset analysis (already completed)
+RUN_CONFIG_GEN=false                          # Generate configuration files (already completed)
+RUN_VALIDATION=false                          # Validate configuration before training (disabled for train_simple.py)
 RUN_TRAINING=true                            # Run model training
 RUN_EVALUATION=true                          # Run model evaluation after training
 
@@ -58,7 +58,7 @@ RUN_EVALUATION=true                          # Run model evaluation after traini
 CONDA_ENV="farsegpp"                          # Conda environment name
 
 # Analysis Parameters
-SAVE_ANALYSIS_JSON=true                       # Save analysis results as JSON
+SAVE_ANALYSIS_JSON=false                       # Save analysis results as JSON (disabled due to JSON serialization issue)
 GENERATE_PLOTS=true                          # Generate visualization plots
 
 # Training Parameters
@@ -154,17 +154,12 @@ if [ "$RUN_CONFIG_GEN" = true ]; then
         --patch_size $PATCH_SIZE \
         --stride $STRIDE \
         --batch_size_train $BATCH_SIZE_TRAIN \
-        --batch_size_val $BATCH_SIZE_VAL \
+        --batch_size_test $BATCH_SIZE_VAL \
         --base_lr $BASE_LR \
-        --max_iters $MAX_ITERS \
-        --num_workers $NUM_WORKERS"
+        --max_iters $MAX_ITERS"
     
     if [ -n "$CLASS_VALUES" ]; then
         CONFIG_CMD="$CONFIG_CMD --class_values $CLASS_VALUES"
-    fi
-    
-    if [ -n "$BACKBONE" ]; then
-        CONFIG_CMD="$CONFIG_CMD --backbone $BACKBONE"
     fi
     
     echo "Running: $CONFIG_CMD"
@@ -185,7 +180,7 @@ if [ "$RUN_VALIDATION" = true ]; then
     CONFIG_FILE="$CONFIG_DIR/$DATASET_NAME/farseg_$DATASET_NAME.py"
     MODEL_OUTPUT_DIR="$MODEL_DIR/$DATASET_NAME"
     
-    VALIDATION_CMD="python train_generic.py \
+    VALIDATION_CMD="python train_simple.py \
         --config $CONFIG_FILE \
         --model_dir $MODEL_OUTPUT_DIR \
         --validate_config"
@@ -208,20 +203,11 @@ if [ "$RUN_TRAINING" = true ]; then
     CONFIG_FILE="$CONFIG_DIR/$DATASET_NAME/farseg_$DATASET_NAME.py"
     MODEL_OUTPUT_DIR="$MODEL_DIR/$DATASET_NAME"
     
-    # Check if multi-GPU training
-    GPU_COUNT=$(echo $GPU_IDS | tr ',' '\n' | wc -l)
-    
-    if [ $GPU_COUNT -gt 1 ]; then
-        echo "Multi-GPU training with $GPU_COUNT GPUs..."
-        TRAIN_CMD="python -m torch.distributed.launch --nproc_per_node=$GPU_COUNT train_generic.py \
-            --config $CONFIG_FILE \
-            --model_dir $MODEL_OUTPUT_DIR"
-    else
-        echo "Single-GPU training..."
-        TRAIN_CMD="python train_generic.py \
-            --config $CONFIG_FILE \
-            --model_dir $MODEL_OUTPUT_DIR"
-    fi
+    # Use simplified training (train_simple.py doesn't support distributed training yet)
+    echo "Training with train_simple.py (optimized for stability)..."
+    TRAIN_CMD="CUDA_VISIBLE_DEVICES=$GPU_IDS python train_simple.py \
+        --config $CONFIG_FILE \
+        --model_dir $MODEL_OUTPUT_DIR"
     
     echo "Running: $TRAIN_CMD"
     eval $TRAIN_CMD
@@ -241,7 +227,7 @@ if [ "$RUN_EVALUATION" = true ]; then
     CONFIG_FILE="$CONFIG_DIR/$DATASET_NAME/farseg_$DATASET_NAME.py"
     MODEL_OUTPUT_DIR="$MODEL_DIR/$DATASET_NAME"
     
-    EVAL_CMD="python train_generic.py \
+    EVAL_CMD="python train_simple.py \
         --config $CONFIG_FILE \
         --model_dir $MODEL_OUTPUT_DIR \
         --eval_only"

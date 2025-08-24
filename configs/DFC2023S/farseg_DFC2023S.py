@@ -56,8 +56,8 @@ config = {
         "train": {
             "type": "GenericSegmentationDataLoader",
             "params": {
-                "image_dir": "../../datasets/DFC2023S/train/rgb",
-                "mask_dir": "../../datasets/DFC2023S/train/sem",
+                "image_dir": "/home/asfand/Ahmad/datasets/DFC2023S/train/rgb",
+                "mask_dir": "/home/asfand/Ahmad/datasets/DFC2023S/train/sem",
                 "dataset_name": "DFC2023S",
                 "num_classes": 2,
                 "class_values": [0, 1],
@@ -82,8 +82,8 @@ config = {
         "test": {
             "type": "GenericSegmentationDataLoader",
             "params": {
-                "image_dir": "../../datasets/DFC2023S/valid/rgb",
-                "mask_dir": "../../datasets/DFC2023S/valid/sem",
+                "image_dir": "/home/asfand/Ahmad/datasets/DFC2023S/valid/rgb",
+                "mask_dir": "/home/asfand/Ahmad/datasets/DFC2023S/valid/sem",
                 "dataset_name": "DFC2023S",
                 "num_classes": 2,
                 "class_values": [0, 1],

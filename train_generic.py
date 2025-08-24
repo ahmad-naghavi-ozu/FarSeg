@@ -16,8 +16,19 @@ Usage:
 import argparse
 import os
 import sys
-from simplecv import apex_ddp_train as train
 import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torch.cuda.amp import autocast, GradScaler
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+import time
+import json
+import numpy as np
+from simplecv.util import logger, registry
+from simplecv.util.checkpoint import CheckPointer
 
 # Add the current directory to Python path to import our modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
