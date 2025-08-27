@@ -115,6 +115,74 @@ def polynomial_lr_scheduler(optimizer, current_iter, max_iters, base_lr, power=0
         param_group['lr'] = lr
     return lr
 
+def validate_config(config_path):
+    """Validate configuration file and data paths."""
+    print("🔍 Validating configuration...")
+    
+    try:
+        # Load config
+        config = load_config(config_path)
+        print(f"✅ Configuration loaded successfully from {config_path}")
+        
+        # Validate required keys
+        required_keys = ['model', 'data', 'optimizer', 'learning_rate', 'train']
+        for key in required_keys:
+            if key not in config:
+                print(f"❌ Missing required configuration key: {key}")
+                return False
+        
+        print(f"✅ All required configuration keys present")
+        
+        # Print key configuration info
+        model_type = config['model']['type']
+        num_classes = config['model']['params']['num_classes']
+        batch_size = config['data']['train']['params']['batch_size']
+        max_iters = config['train']['num_iters']
+        base_lr = config['learning_rate']['params']['base_lr']
+        
+        print(f"📋 Configuration Summary:")
+        print(f"   Model type: {model_type}")
+        print(f"   Number of classes: {num_classes}")
+        print(f"   Batch size: {batch_size}")
+        print(f"   Max iterations: {max_iters}")
+        print(f"   Base learning rate: {base_lr}")
+        
+        # Validate data paths
+        print(f"\n🔍 Validating data paths...")
+        train_config = config['data']['train']['params']
+        test_config = config['data']['test']['params']
+        
+        paths_to_check = [
+            ('Training images', train_config['image_dir']),
+            ('Training masks', train_config['mask_dir']),
+            ('Test images', test_config['image_dir']),
+            ('Test masks', test_config['mask_dir'])
+        ]
+        
+        all_paths_valid = True
+        for name, path in paths_to_check:
+            if os.path.exists(path):
+                # Count files
+                import glob
+                file_count = len(glob.glob(os.path.join(path, '*')))
+                print(f"✅ {name}: {path} ({file_count} files)")
+            else:
+                print(f"❌ {name}: {path} (not found)")
+                all_paths_valid = False
+        
+        if all_paths_valid:
+            print(f"\n✅ Configuration validation passed!")
+            print(f"💡 Ready to start training with: python train_simple.py --config {config_path} --model_dir <model_dir>")
+            return True
+        else:
+            print(f"\n❌ Configuration validation failed - some data paths are missing")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Configuration validation failed: {e}")
+        return False
+
+
 def train_model(config_path, model_dir, gpu_ids="0"):
     """Main training function."""
     
@@ -278,12 +346,14 @@ def train_model(config_path, model_dir, gpu_ids="0"):
                     else:
                         model_state[key] = value
                 
+                # Save only picklable state information
                 torch.save({
                     'model_state_dict': model_state,
                     'optimizer_state_dict': optimizer.state_dict(),
                     'global_step': global_step,
                     'epoch': epoch,
-                    'config': config
+                    'model_type': 'FarSeg',
+                    'num_classes': getattr(config, 'model', {}).get('num_classes', 2)
                 }, checkpoint_path)
                 print(f"\n✅ Checkpoint saved: {checkpoint_path}")
             
@@ -294,7 +364,7 @@ def train_model(config_path, model_dir, gpu_ids="0"):
     # Close progress bar
     pbar.close()
     
-    # Save final model
+    # Save final model (avoiding pickle issues with config)
     final_path = os.path.join(model_dir, f"model-{global_step}.pth")
     
     # Create clean state dict for final save
@@ -305,12 +375,15 @@ def train_model(config_path, model_dir, gpu_ids="0"):
         else:
             model_state[key] = value
     
+    # Save only picklable state information
     torch.save({
         'model_state_dict': model_state,
         'optimizer_state_dict': optimizer.state_dict(),
         'global_step': global_step,
         'epoch': epoch,
-        'config': config
+        'model_type': 'FarSeg',
+        'num_classes': getattr(config, 'model', {}).get('num_classes', 2),
+        'training_completed': True
     }, final_path)
     
     total_time = time.time() - start_time
@@ -323,9 +396,17 @@ def main():
     parser.add_argument('--config', required=True, help='Config file path')
     parser.add_argument('--model_dir', required=True, help='Model directory')
     parser.add_argument('--gpu_ids', default="0", help='GPU IDs (e.g., "0,1,2,3")')
+    parser.add_argument('--validate_config', action='store_true', 
+                       help='Only validate configuration and data paths, do not train')
     
     args = parser.parse_args()
     
+    # If validation only, run validation and exit
+    if args.validate_config:
+        success = validate_config(args.config)
+        sys.exit(0 if success else 1)
+    
+    # Otherwise, run training
     train_model(args.config, args.model_dir, args.gpu_ids)
 
 if __name__ == '__main__':

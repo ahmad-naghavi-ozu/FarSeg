@@ -13,7 +13,7 @@ set -e  # Exit on any error
 #===============================================================================
 
 # Dataset Configuration
-DATASET_NAME="DFC2023S"              # Name of your dataset
+DATASET_NAME="DFC2023mini"              # Name of your dataset
 DATASET_PATH="/home/asfand/Ahmad/datasets/"          # Root path to datasets directory
 NUM_CLASSES=2                                   # Number of classes in your dataset
 CLASS_VALUES="0,1"                      # Comma-separated class values
@@ -44,9 +44,9 @@ ANALYSIS_DIR="./analysis"                     # Directory to save analysis resul
 CONFIG_DIR="./configs"                        # Directory for generated configs
 
 # Pipeline Control Flags
-RUN_ANALYSIS=false                             # Run dataset analysis (already completed)
-RUN_CONFIG_GEN=false                          # Generate configuration files (already completed)
-RUN_VALIDATION=false                          # Validate configuration before training (disabled for train_simple.py)
+RUN_ANALYSIS=true                             # Run dataset analysis (already completed)
+RUN_CONFIG_GEN=true                          # Generate configuration files (already completed)
+RUN_VALIDATION=true                           # Validate configuration before training (now supported by train_simple.py)
 RUN_TRAINING=true                            # Run model training
 RUN_EVALUATION=true                          # Run model evaluation after training
 
@@ -70,6 +70,65 @@ VAL_FREQUENCY=2000                           # Validation frequency (iterations)
 # PIPELINE EXECUTION - DO NOT MODIFY BELOW THIS LINE
 #===============================================================================
 
+# Parse command line arguments to override defaults
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dataset)
+            DATASET_NAME="$2"
+            shift 2
+            ;;
+        --max_iters)
+            MAX_ITERS="$2"
+            shift 2
+            ;;
+        --batch_size_train)
+            BATCH_SIZE_TRAIN="$2"
+            shift 2
+            ;;
+        --gpu_ids)
+            GPU_IDS="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "FarSeg/FarSeg++ Training Pipeline"
+            echo ""
+            echo "Usage: ./run.sh [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --dataset DATASET_NAME      Name of the dataset (default: DFC2023mini)"
+            echo "  --max_iters VALUE          Maximum training iterations (default: 60000)"
+            echo "  --batch_size_train VALUE   Training batch size (default: 2)"
+            echo "  --gpu_ids VALUE            GPU IDs to use (default: 2)"
+            echo "  --help, -h                 Show this help message"
+            echo ""
+            echo "Example:"
+            echo "  ./run.sh --dataset DFC2023mini --max_iters 60 --batch_size_train 4"
+            echo "  ./run.sh --dataset DFC2023S --gpu_ids 0,1"
+            echo ""
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: ./run.sh [--dataset DATASET_NAME] [--max_iters VALUE] [--batch_size_train VALUE] [--gpu_ids VALUE]"
+            echo "Example: ./run.sh --dataset DFC2023mini --max_iters 60 --batch_size_train 4"
+            echo "Use --help for more information."
+            exit 1
+            ;;
+    esac
+done
+
+# Adjust save and validation frequencies based on max_iters
+if [ "$MAX_ITERS" -le 100 ]; then
+    SAVE_FREQUENCY=10  # Save every 10 iterations for debugging
+    VAL_FREQUENCY=5    # Validate every 5 iterations
+elif [ "$MAX_ITERS" -le 1000 ]; then
+    SAVE_FREQUENCY=100
+    VAL_FREQUENCY=50
+else
+    SAVE_FREQUENCY=5000
+    VAL_FREQUENCY=2000
+fi
+
 echo "============================================================================="
 echo "FarSeg/FarSeg++ Training Pipeline"
 echo "============================================================================="
@@ -77,6 +136,9 @@ echo "Dataset: $DATASET_NAME"
 echo "Model: $MODEL_TYPE"
 echo "Classes: $NUM_CLASSES"
 echo "GPU(s): $GPU_IDS"
+echo "Max Iterations: $MAX_ITERS"
+echo "Save Frequency: $SAVE_FREQUENCY"
+echo "Val Frequency: $VAL_FREQUENCY"
 echo "============================================================================="
 
 # Activate conda environment
@@ -226,11 +288,14 @@ if [ "$RUN_EVALUATION" = true ]; then
     
     CONFIG_FILE="$CONFIG_DIR/$DATASET_NAME/farseg_$DATASET_NAME.py"
     MODEL_OUTPUT_DIR="$MODEL_DIR/$DATASET_NAME"
+    EVAL_OUTPUT_DIR="$MODEL_OUTPUT_DIR/evaluation"
     
-    EVAL_CMD="python train_simple.py \
+    # Use the new generic evaluation script
+    EVAL_CMD="python eval_simple.py \
         --config $CONFIG_FILE \
         --model_dir $MODEL_OUTPUT_DIR \
-        --eval_only"
+        --output_dir $EVAL_OUTPUT_DIR \
+        --gpu_ids $GPU_IDS"
     
     echo "Running: $EVAL_CMD"
     eval $EVAL_CMD
@@ -253,11 +318,16 @@ echo "  - Configs: $CONFIG_DIR/$DATASET_NAME"
 echo "============================================================================="
 
 # Display final model performance (if available)
-if [ -f "$MODEL_OUTPUT_DIR/eval_results.txt" ]; then
+if [ -f "$MODEL_DIR/$DATASET_NAME/evaluation/eval_results.txt" ]; then
     echo ""
     echo "Final Model Performance:"
     echo "============================================================================="
-    cat "$MODEL_OUTPUT_DIR/eval_results.txt"
+    cat "$MODEL_DIR/$DATASET_NAME/evaluation/eval_results.txt"
+elif [ -f "$MODEL_DIR/$DATASET_NAME/eval_results.txt" ]; then
+    echo ""
+    echo "Final Model Performance:"
+    echo "============================================================================="
+    cat "$MODEL_DIR/$DATASET_NAME/eval_results.txt"
 fi
 
 echo ""

@@ -121,6 +121,8 @@ checkpoints/
 logs/
 wandb/
 .tensorboard/
+models/
+analysis/
 
 # IDE specific
 .vscode/
