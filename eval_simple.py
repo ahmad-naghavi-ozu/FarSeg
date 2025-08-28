@@ -6,6 +6,9 @@ Works with any dataset configuration and provides comprehensive metrics.
 
 import os
 import sys
+
+# Force unbuffered output for real-time progress bars
+os.environ['PYTHONUNBUFFERED'] = '1'
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -220,43 +223,96 @@ def save_prediction_samples(images, predictions, ground_truth, output_dir, num_s
     
     print(f"✅ Saved {num_samples} prediction samples to: {output_dir}")
 
-def save_prediction_masks(predictions, ground_truth, output_dir, dataset_name, test_dataset):
-    """Save prediction masks with same filenames as ground truth."""
+def save_prediction_masks(predictions, ground_truth, output_dir, dataset_name, test_dataset, processed_files=None):
+    """Save prediction masks with same filenames as ground truth by reconstructing from patches."""
     dataset_predictions_dir = os.path.join(output_dir, dataset_name)
     os.makedirs(dataset_predictions_dir, exist_ok=True)
     
     print(f"💾 Saving prediction masks to: {dataset_predictions_dir}")
     
-    # Get original filenames from dataset if possible
+    # Get unique image files from dataset _data_list
     try:
-        # Try to get filenames from dataset
-        if hasattr(test_dataset, 'mask_files'):
-            mask_files = test_dataset.mask_files
+        if hasattr(test_dataset, '_data_list') and test_dataset._data_list:
+            # Extract unique mask paths and filenames
+            unique_files = {}
+            for item in test_dataset._data_list:
+                image_path, mask_path, window = item
+                if mask_path:
+                    filename = os.path.basename(mask_path)
+                    if filename not in unique_files:
+                        unique_files[filename] = {
+                            'mask_path': mask_path,
+                            'patches': []
+                        }
+                    unique_files[filename]['patches'].append({
+                        'window': window,
+                        'index': len(unique_files[filename]['patches'])
+                    })
+            
+            print(f"Found {len(unique_files)} unique images with {len(predictions)} total patches")
+            
+            # Reconstruct full images from patches
+            patch_idx = 0
+            for filename, file_info in unique_files.items():
+                mask_path = file_info['mask_path']
+                patches_info = file_info['patches']
+                
+                # Load original mask to get dimensions
+                original_mask = Image.open(mask_path)
+                width, height = original_mask.size
+                
+                # Create empty prediction image
+                full_prediction = np.zeros((height, width), dtype=np.uint8)
+                patch_count = np.zeros((height, width), dtype=np.uint8)
+                
+                # Aggregate patches
+                for patch_info in patches_info:
+                    if patch_idx < len(predictions):
+                        window = patch_info['window']
+                        pred_patch = predictions[patch_idx].cpu().numpy().astype(np.uint8)
+                        
+                        # Extract window coordinates
+                        y1, x1, y2, x2 = window
+                        
+                        # Add patch to full image
+                        full_prediction[y1:y2, x1:x2] += pred_patch
+                        patch_count[y1:y2, x1:x2] += 1
+                        
+                        patch_idx += 1
+                
+                # Average overlapping regions
+                mask = patch_count > 0
+                full_prediction[mask] = full_prediction[mask] // patch_count[mask]
+                
+                # Save reconstructed prediction
+                pred_path = os.path.join(dataset_predictions_dir, filename)
+                Image.fromarray(full_prediction).save(pred_path)
+            
+            print(f"✅ Saved {len(unique_files)} prediction masks with original filenames")
+            
         else:
-            # Fallback to numbered files
-            mask_files = [f"prediction_{i+1:04d}.png" for i in range(len(predictions))]
-    except:
-        mask_files = [f"prediction_{i+1:04d}.png" for i in range(len(predictions))]
-    
-    for i, pred_mask in enumerate(predictions):
-        # Get original filename
-        if i < len(mask_files):
-            if hasattr(test_dataset, 'mask_files'):
-                original_filename = os.path.basename(mask_files[i])
-            else:
-                original_filename = f"prediction_{i+1:04d}.png"
-        else:
-            original_filename = f"prediction_{i+1:04d}.png"
+            # Fallback: save patches with numbered names
+            print("⚠️  Warning: Could not extract filenames from dataset, saving patches individually")
+            for i, pred_mask in enumerate(predictions):
+                pred_array = pred_mask.cpu().numpy().astype(np.uint8)
+                pred_path = os.path.join(dataset_predictions_dir, f"prediction_patch_{i+1:04d}.png")
+                Image.fromarray(pred_array).save(pred_path)
+            
+            print(f"✅ Saved {len(predictions)} prediction patches")
+            
+    except Exception as e:
+        print(f"❌ Error during prediction saving: {e}")
+        # Emergency fallback
+        for i, pred_mask in enumerate(predictions):
+            pred_array = pred_mask.cpu().numpy().astype(np.uint8)
+            pred_path = os.path.join(dataset_predictions_dir, f"prediction_{i+1:04d}.png")
+            Image.fromarray(pred_array).save(pred_path)
         
-        # Save prediction mask
-        pred_array = pred_mask.cpu().numpy().astype(np.uint8)
-        pred_path = os.path.join(dataset_predictions_dir, original_filename)
-        Image.fromarray(pred_array).save(pred_path)
+        print(f"✅ Saved {len(predictions)} prediction masks (fallback mode)")
     
-    print(f"✅ Saved {len(predictions)} prediction masks")
     return dataset_predictions_dir
 
-def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_path=None):
+def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_path=None, force_predictions=False):
     """Main evaluation function."""
     
     # Setup GPU environment
@@ -293,14 +349,16 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     model = load_model_checkpoint(model, checkpoint_path, device)
     
     # Build test dataset
+    print("📚 Building test dataset...")
     test_dataset = build_dataset(config, 'test')
-    print(f"Test dataset: {len(test_dataset)} samples")
+    print(f"✅ Test dataset: {len(test_dataset)} samples")
     
     # Get evaluation parameters
     batch_size = config['data']['test']['params']['batch_size']
     num_classes = config['model']['params']['num_classes']
     
     # Create data loader
+    print("🔄 Creating data loader...")
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
@@ -309,25 +367,68 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
         pin_memory=True,
         collate_fn=custom_collate_fn
     )
+    print(f"✅ Data loader ready: {len(test_loader)} batches")
     
+    # Check if predictions already exist (unless forcing regeneration)
+    dataset_name = os.path.basename(config_path).replace('farseg_', '').replace('.py', '')
+    main_predictions_dir = os.path.join(os.path.dirname(output_dir), '..', '..', 'predictions')
+    dataset_predictions_dir = os.path.join(main_predictions_dir, dataset_name)
+    
+    if not force_predictions and os.path.exists(dataset_predictions_dir):
+        prediction_files = [f for f in os.listdir(dataset_predictions_dir) if f.endswith(('.png', '.jpg', '.jpeg', '.tif'))]
+        if len(prediction_files) > 0:
+            print(f"🎯 Found {len(prediction_files)} existing predictions in {dataset_predictions_dir}")
+            print(f"   Use --force_predictions to regenerate them")
+            print(f"   Proceeding with full evaluation to compute fresh metrics...")
+
     # Evaluation metrics
     all_predictions = []
     all_ground_truth = []
     all_images = []
     total_loss = 0.0
     sample_count = 0
-    
+
     print(f"Starting evaluation...")
     print(f"Device: {device}")
     print(f"Batch size: {batch_size}")
     print(f"Number of classes: {num_classes}")
-    
+    print(f"🕐 Preparing evaluation loop...")
+    sys.stdout.flush()
+
     start_time = time.time()
     
+    print(f"🚀 Starting model inference on {len(test_loader)} batches...")
+    sys.stdout.flush()  # Force immediate output
+    
+    # Warm up the model to avoid delay on first batch
+    print(f"🔥 Warming up model...")
+    sys.stdout.flush()
+    try:
+        # Create a dummy input to warm up CUDA
+        dummy_input = torch.randn(1, 3, 224, 224).to(device)
+        with torch.no_grad():
+            _ = model(dummy_input)
+        print(f"✅ Model warmed up")
+        sys.stdout.flush()
+    except Exception as e:
+        print(f"⚠️  Warmup failed (continuing anyway): {e}")
+        sys.stdout.flush()
+    
     with torch.no_grad():
-        pbar = tqdm(test_loader, desc="Evaluating", unit="batch")
+        print(f"⏱️  Creating progress bar...")
+        sys.stdout.flush()
+        
+        pbar = tqdm(test_loader, desc="Evaluating", unit="batch", dynamic_ncols=True, leave=True, file=sys.stdout)
+        pbar.set_postfix({'Samples': 0, 'GPU': f'{gpu_ids}'})  # Initialize immediately
+        
+        print(f"⏱️  Starting batch processing...")
+        sys.stdout.flush()
         
         for batch_idx, batch in enumerate(pbar):
+            if batch_idx == 0:
+                print(f"⏱️  Processing first batch...")
+                sys.stdout.flush()
+            
             # Handle batch format
             images = batch[0].to(device)
             targets_dict = batch[1]
@@ -397,8 +498,9 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     pixel_accuracy = (valid_predictions == valid_ground_truth).float().mean().item()
     
     # Calculate IoU for each class
+    print("🧮 Computing per-sample IoU metrics...")
     class_ious = []
-    for i in range(len(all_predictions)):
+    for i in tqdm(range(len(all_predictions)), desc="Computing IoU", unit="sample"):
         ious = calculate_iou(all_predictions[i], all_ground_truth[i], num_classes)
         class_ious.append(ious)
     
@@ -410,13 +512,15 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     mean_iou = np.mean(valid_class_ious) if len(valid_class_ious) > 0 else 0.0
     
     # Calculate confusion matrix
+    print("📊 Computing confusion matrix...")
     conf_matrix = confusion_matrix(
         valid_ground_truth.numpy(), 
         valid_predictions.numpy(),
         labels=list(range(num_classes))
     )
-    
+
     # Classification report
+    print("📋 Generating classification report...")
     class_report = classification_report(
         valid_ground_truth.numpy(),
         valid_predictions.numpy(),
@@ -424,8 +528,9 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
         output_dict=True,
         zero_division=0
     )
-    
+
     # Calculate per-class metrics
+    print("📈 Computing precision, recall, and F1 scores...")
     precision, recall, f1, support = precision_recall_fscore_support(
         valid_ground_truth.numpy(),
         valid_predictions.numpy(),
@@ -526,7 +631,20 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     dataset_name = os.path.basename(config_path).replace('farseg_', '').replace('.py', '')
     # Get the main predictions directory from the parent of output_dir
     main_predictions_dir = os.path.join(os.path.dirname(output_dir), '..', '..', 'predictions')
-    predictions_dir = save_prediction_masks(all_predictions, all_ground_truth, main_predictions_dir, dataset_name, test_dataset)
+    
+    # Check if we should save predictions
+    dataset_predictions_dir = os.path.join(main_predictions_dir, dataset_name)
+    existing_files = []
+    if os.path.exists(dataset_predictions_dir):
+        existing_files = [f for f in os.listdir(dataset_predictions_dir) if f.endswith(('.png', '.jpg', '.jpeg', '.tif'))]
+    
+    should_save_predictions = force_predictions or len(existing_files) == 0
+    
+    if should_save_predictions:
+        predictions_dir = save_prediction_masks(all_predictions, all_ground_truth, main_predictions_dir, dataset_name, test_dataset)
+    else:
+        predictions_dir = dataset_predictions_dir
+        print(f"Skipping prediction saving - predictions already exist (use --force_predictions to regenerate)")
     
     print(f"\n💾 Results saved to:")
     print(f"  JSON: {results_file}")
@@ -545,6 +663,7 @@ def main():
     parser.add_argument('--output_dir', help='Output directory for evaluation results (default: model_dir/evaluation)')
     parser.add_argument('--checkpoint', help='Specific checkpoint file to evaluate (default: latest)')
     parser.add_argument('--gpu_ids', default="0", help='GPU IDs (e.g., "0,1,2,3")')
+    parser.add_argument('--force_predictions', action='store_true', help='Force regeneration of predictions even if they exist')
     
     args = parser.parse_args()
     
@@ -558,7 +677,8 @@ def main():
         model_dir=args.model_dir,
         output_dir=args.output_dir,
         gpu_ids=args.gpu_ids,
-        checkpoint_path=args.checkpoint
+        checkpoint_path=args.checkpoint,
+        force_predictions=args.force_predictions
     )
 
 if __name__ == '__main__':

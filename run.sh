@@ -50,6 +50,7 @@ RUN_CONFIG_GEN=true                          # Generate configuration files (alr
 RUN_VALIDATION=true                           # Validate configuration before training (now supported by train_simple.py)
 RUN_TRAINING=true                            # Run model training
 RUN_EVALUATION=true                          # Run model evaluation after training
+FORCE_PREDICTIONS=false                      # Force regeneration of predictions even if they exist
 
 #===============================================================================
 # ADVANCED PARAMETERS (usually don't need to change)
@@ -90,6 +91,10 @@ while [[ $# -gt 0 ]]; do
             GPU_IDS="$2"
             shift 2
             ;;
+        --force_predictions)
+            FORCE_PREDICTIONS=true
+            shift 1
+            ;;
         --help|-h)
             echo "FarSeg/FarSeg++ Training Pipeline"
             echo ""
@@ -100,11 +105,12 @@ while [[ $# -gt 0 ]]; do
             echo "  --max_iters VALUE          Maximum training iterations (default: 60000)"
             echo "  --batch_size_train VALUE   Training batch size (default: 2)"
             echo "  --gpu_ids VALUE            GPU IDs to use (default: 2)"
+            echo "  --force_predictions        Force regeneration of predictions even if they exist"
             echo "  --help, -h                 Show this help message"
             echo ""
             echo "Example:"
             echo "  ./run.sh --dataset DFC2023mini --max_iters 60 --batch_size_train 4"
-            echo "  ./run.sh --dataset DFC2023S --gpu_ids 0,1"
+            echo "  ./run.sh --dataset DFC2023S --gpu_ids 0,1 --force_predictions"
             echo ""
             exit 0
             ;;
@@ -293,11 +299,16 @@ if [ "$RUN_EVALUATION" = true ]; then
     EVAL_OUTPUT_DIR="$MODEL_OUTPUT_DIR/evaluation"
     
     # Use the new generic evaluation script
-    EVAL_CMD="python eval_simple.py \
+    EVAL_CMD="python -u eval_simple.py \
         --config $CONFIG_FILE \
         --model_dir $MODEL_OUTPUT_DIR \
         --output_dir $EVAL_OUTPUT_DIR \
         --gpu_ids $GPU_IDS"
+    
+    # Add force predictions flag if specified
+    if [ "$FORCE_PREDICTIONS" = true ]; then
+        EVAL_CMD="$EVAL_CMD --force_predictions"
+    fi
     
     echo "Running: $EVAL_CMD"
     eval $EVAL_CMD

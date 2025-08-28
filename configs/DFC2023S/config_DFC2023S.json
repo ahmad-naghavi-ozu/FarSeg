@@ -1,0 +1,143 @@
+{
+  "model": {
+    "type": "FarSeg",
+    "params": {
+      "resnet_encoder": {
+        "resnet_type": "resnet50",
+        "include_conv5": true,
+        "batchnorm_trainable": true,
+        "pretrained": true,
+        "freeze_at": 0,
+        "output_stride": 32,
+        "with_cp": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "stem3_3x3": false
+      },
+      "fpn": {
+        "in_channels_list": [
+          256,
+          512,
+          1024,
+          2048
+        ],
+        "out_channels": 256,
+        "conv_block": "fpn.default_conv_block",
+        "top_blocks": null
+      },
+      "scene_relation": {
+        "in_channels": 2048,
+        "channel_list": [
+          256,
+          256,
+          256,
+          256
+        ],
+        "out_channels": 256,
+        "scale_aware_proj": true
+      },
+      "decoder": {
+        "in_channels": 256,
+        "out_channels": 128,
+        "in_feat_output_strides": [
+          4,
+          8,
+          16,
+          32
+        ],
+        "out_feat_output_stride": 4,
+        "norm_fn": "nn.BatchNorm2d",
+        "num_groups_gn": null
+      },
+      "num_classes": 2,
+      "loss": {
+        "cls_weight": 1.0,
+        "ignore_index": 255
+      },
+      "annealing_softmax_focalloss": {
+        "gamma": 2.0,
+        "max_step": 100,
+        "annealing_type": "cosine"
+      }
+    }
+  },
+  "data": {
+    "train": {
+      "type": "GenericSegmentationDataLoader",
+      "params": {
+        "image_dir": "/home/asfand/Ahmad/datasets/DFC2023S/train/rgb",
+        "mask_dir": "/home/asfand/Ahmad/datasets/DFC2023S/train/sem",
+        "dataset_name": "DFC2023S",
+        "num_classes": 2,
+        "class_values": [
+          0,
+          1
+        ],
+        "patch_config": {
+          "patch_size": 896,
+          "stride": 512
+        },
+        "transforms": "TRAIN_TRANSFORMS",
+        "batch_size": 2,
+        "num_workers": 8,
+        "training": true
+      }
+    },
+    "test": {
+      "type": "GenericSegmentationDataLoader",
+      "params": {
+        "image_dir": "/home/asfand/Ahmad/datasets/DFC2023S/valid/rgb",
+        "mask_dir": "/home/asfand/Ahmad/datasets/DFC2023S/valid/sem",
+        "dataset_name": "DFC2023S",
+        "num_classes": 2,
+        "class_values": [
+          0,
+          1
+        ],
+        "patch_config": {
+          "patch_size": 896,
+          "stride": 512
+        },
+        "transforms": "TEST_TRANSFORMS",
+        "batch_size": 1,
+        "num_workers": 0,
+        "training": false
+      }
+    }
+  },
+  "optimizer": {
+    "type": "sgd",
+    "params": {
+      "momentum": 0.9,
+      "weight_decay": 0.0001
+    },
+    "grad_clip": {
+      "max_norm": 35,
+      "norm_type": 2
+    }
+  },
+  "learning_rate": {
+    "type": "poly",
+    "params": {
+      "base_lr": 0.007,
+      "power": 0.9,
+      "max_iters": 100
+    }
+  },
+  "train": {
+    "forward_times": 1,
+    "num_iters": 100,
+    "eval_per_epoch": false,
+    "summary_grads": false,
+    "summary_weights": false,
+    "distributed": true,
+    "apex_sync_bn": true,
+    "sync_bn": false,
+    "eval_after_train": false,
+    "log_interval_step": 50
+  },
+  "test": {}
+}
