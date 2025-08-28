@@ -81,7 +81,7 @@
           "stride": 512
         },
         "transforms": "TRAIN_TRANSFORMS",
-        "batch_size": 1,
+        "batch_size": 2,
         "num_workers": 8,
         "training": true
       }

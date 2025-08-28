@@ -74,7 +74,7 @@ config = {
                     segm.ToTensor(True),
                     comm.THMeanStdNormalize((123.675, 116.28, 103.53), (58.395, 57.12, 57.375))
                 ],
-                "batch_size": 1,
+                "batch_size": 2,
                 "num_workers": 8,
                 "training": True
             },

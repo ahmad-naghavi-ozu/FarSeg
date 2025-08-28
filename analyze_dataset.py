@@ -127,17 +127,22 @@ def analyze_masks(mask_dir, mask_extension='.png'):
     total_pixels = sum(overall_class_counts.values())
     sorted_classes = sorted(all_unique_values)
     
+    # Convert to JSON serializable types
+    json_serializable_classes = [int(cls) if isinstance(cls, (np.integer, bool)) else 
+                                str(cls) if not isinstance(cls, (int, float, str)) else 
+                                cls for cls in sorted_classes]
+    
     analysis_results = {
         'dataset_info': {
             'num_mask_files': len(mask_files),
-            'total_pixels_analyzed': total_pixels,
-            'unique_class_values': sorted_classes,
+            'total_pixels_analyzed': int(total_pixels),
+            'unique_class_values': json_serializable_classes,
             'num_classes': len(sorted_classes)
         },
         'class_distribution': {
             int(cls): {
                 'pixel_count': int(overall_class_counts[cls]),
-                'percentage': (overall_class_counts[cls] / total_pixels) * 100,
+                'percentage': float((overall_class_counts[cls] / total_pixels) * 100),
                 'num_images_containing': sum(1 for img_stat in per_image_stats 
                                            if cls in img_stat['unique_classes'])
             }

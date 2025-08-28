@@ -220,6 +220,42 @@ def save_prediction_samples(images, predictions, ground_truth, output_dir, num_s
     
     print(f"✅ Saved {num_samples} prediction samples to: {output_dir}")
 
+def save_prediction_masks(predictions, ground_truth, output_dir, dataset_name, test_dataset):
+    """Save prediction masks with same filenames as ground truth."""
+    dataset_predictions_dir = os.path.join(output_dir, dataset_name)
+    os.makedirs(dataset_predictions_dir, exist_ok=True)
+    
+    print(f"💾 Saving prediction masks to: {dataset_predictions_dir}")
+    
+    # Get original filenames from dataset if possible
+    try:
+        # Try to get filenames from dataset
+        if hasattr(test_dataset, 'mask_files'):
+            mask_files = test_dataset.mask_files
+        else:
+            # Fallback to numbered files
+            mask_files = [f"prediction_{i+1:04d}.png" for i in range(len(predictions))]
+    except:
+        mask_files = [f"prediction_{i+1:04d}.png" for i in range(len(predictions))]
+    
+    for i, pred_mask in enumerate(predictions):
+        # Get original filename
+        if i < len(mask_files):
+            if hasattr(test_dataset, 'mask_files'):
+                original_filename = os.path.basename(mask_files[i])
+            else:
+                original_filename = f"prediction_{i+1:04d}.png"
+        else:
+            original_filename = f"prediction_{i+1:04d}.png"
+        
+        # Save prediction mask
+        pred_array = pred_mask.cpu().numpy().astype(np.uint8)
+        pred_path = os.path.join(dataset_predictions_dir, original_filename)
+        Image.fromarray(pred_array).save(pred_path)
+    
+    print(f"✅ Saved {len(predictions)} prediction masks")
+    return dataset_predictions_dir
+
 def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_path=None):
     """Main evaluation function."""
     
@@ -482,15 +518,22 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     plt.savefig(confusion_matrix_file, dpi=150, bbox_inches='tight')
     plt.close()
     
-    # Save sample predictions
+    # Save sample predictions for evaluation visualization
     samples_dir = os.path.join(output_dir, 'prediction_samples')
     save_prediction_samples(all_images, all_predictions, all_ground_truth, samples_dir)
+    
+    # Save prediction masks to main predictions directory
+    dataset_name = os.path.basename(config_path).replace('farseg_', '').replace('.py', '')
+    # Get the main predictions directory from the parent of output_dir
+    main_predictions_dir = os.path.join(os.path.dirname(output_dir), '..', '..', 'predictions')
+    predictions_dir = save_prediction_masks(all_predictions, all_ground_truth, main_predictions_dir, dataset_name, test_dataset)
     
     print(f"\n💾 Results saved to:")
     print(f"  JSON: {results_file}")
     print(f"  Text: {results_txt}")
     print(f"  Confusion matrix: {confusion_matrix_file}")
     print(f"  Sample predictions: {samples_dir}")
+    print(f"  Prediction masks: {predictions_dir}")
     
     print(f"\n🎉 Evaluation completed successfully!")
     return results

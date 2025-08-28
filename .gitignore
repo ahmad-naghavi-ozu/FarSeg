@@ -123,6 +123,8 @@ wandb/
 .tensorboard/
 models/
 analysis/
+predictions/
+visualization/
 
 # IDE specific
 .vscode/

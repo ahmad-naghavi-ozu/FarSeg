@@ -13,13 +13,13 @@ set -e  # Exit on any error
 #===============================================================================
 
 # Dataset Configuration
-DATASET_NAME="DFC2023mini"              # Name of your dataset
+DATASET_NAME="DFC2023S"              # Name of your dataset
 DATASET_PATH="/home/asfand/Ahmad/datasets/"          # Root path to datasets directory
 NUM_CLASSES=2                                   # Number of classes in your dataset
 CLASS_VALUES="0,1"                      # Comma-separated class values
 
 # Model Configuration  
-MODEL_TYPE="farseg"                            # Model type: "farseg" or "farsegpp"
+MODEL_TYPE="farsegpp"                            # Model type: "farseg" or "farsegpp"
 BACKBONE="resnet50"                            # Backbone: "resnet50", "mit_b2", etc.
 
 # Training Parameters
@@ -31,7 +31,7 @@ BASE_LR=0.007                                  # Base learning rate
 MAX_ITERS=60000                               # Maximum training iterations
 
 # Hardware Configuration
-GPU_IDS="2"                                  # GPU IDs to use (switching to GPU 3 to avoid memory conflicts)
+GPU_IDS="0,1"                                  # GPU IDs to use (switching to GPU 3 to avoid memory conflicts)
 NUM_WORKERS=4                                  # Number of data loading workers
 
 # File Extensions (auto-detection if not specified)
@@ -42,6 +42,7 @@ MASK_EXTENSION=""                             # Leave empty for auto-detection
 MODEL_DIR="./models"                          # Directory to save trained models
 ANALYSIS_DIR="./analysis"                     # Directory to save analysis results
 CONFIG_DIR="./configs"                        # Directory for generated configs
+PREDICTIONS_DIR="./predictions"               # Directory to save prediction outputs
 
 # Pipeline Control Flags
 RUN_ANALYSIS=true                             # Run dataset analysis (already completed)
@@ -58,7 +59,7 @@ RUN_EVALUATION=true                          # Run model evaluation after traini
 CONDA_ENV="farsegpp"                          # Conda environment name
 
 # Analysis Parameters
-SAVE_ANALYSIS_JSON=false                       # Save analysis results as JSON (disabled due to JSON serialization issue)
+SAVE_ANALYSIS_JSON=true                        # Save analysis results as JSON (fixed JSON serialization issue)
 GENERATE_PLOTS=true                          # Generate visualization plots
 
 # Training Parameters
@@ -166,6 +167,7 @@ export CUDA_VISIBLE_DEVICES=$GPU_IDS
 mkdir -p $MODEL_DIR
 mkdir -p $ANALYSIS_DIR
 mkdir -p $CONFIG_DIR
+mkdir -p $PREDICTIONS_DIR
 
 #===============================================================================
 # STEP 1: Dataset Analysis
@@ -180,7 +182,7 @@ if [ "$RUN_ANALYSIS" = true ]; then
         --dataset_path $DATASET_PATH \
         --dataset_name $DATASET_NAME \
         --split train \
-        --output_dir $ANALYSIS_DIR"
+        --output_dir $ANALYSIS_DIR/$DATASET_NAME"
     
     if [ "$SAVE_ANALYSIS_JSON" = true ]; then
         ANALYSIS_CMD="$ANALYSIS_CMD --save_json"
@@ -313,8 +315,9 @@ echo "🎉 FarSeg Pipeline Completed Successfully!"
 echo "============================================================================="
 echo "Results saved in:"
 echo "  - Models: $MODEL_DIR/$DATASET_NAME"
-echo "  - Analysis: $ANALYSIS_DIR"
+echo "  - Analysis: $ANALYSIS_DIR/$DATASET_NAME"
 echo "  - Configs: $CONFIG_DIR/$DATASET_NAME"
+echo "  - Predictions: $MODEL_DIR/$DATASET_NAME/evaluation/full_predictions"
 echo "============================================================================="
 
 # Display final model performance (if available)
