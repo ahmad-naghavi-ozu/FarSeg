@@ -143,6 +143,20 @@ See [README_GENERIC.md](README_GENERIC.md) for detailed instructions on training
 - **Train+Valid Fusion**: Manuscript-compliant training strategy combining train and validation splits
 - **Progress Tracking**: Real-time progress bars with fixed output buffering
 - **GPU Optimization**: Single GPU training with memory management and batch size recommendations
+- **Model Separation**: Results stored in model-specific directories to prevent overwrites
+- **Execution Logging**: Timestamped logs for complete execution tracking and debugging
+
+### Model Separation System
+```bash
+# Results are automatically separated by model type
+MODEL_TYPE="farsegpp" ./run.sh --action all --dataset DFC2023S  # Saves to farsegpp/DFC2023S/
+MODEL_TYPE="farseg" ./run.sh --action all --dataset DFC2023S    # Saves to farseg/DFC2023S/
+```
+
+### Execution Logging
+- **Timestamped Logs**: `logs/farsegpp_DFC2023S_20250829_151248.log`
+- **Complete Audit Trail**: All commands, outputs, and timestamps captured
+- **Real-time Monitoring**: `tail -f logs/MODEL_TYPE_DATASET_*.log`
 
 ### Hardware Configuration
 - **GPU Support**: Single GPU training (train_simple.py limitation)
@@ -160,6 +174,10 @@ See [README_GENERIC.md](README_GENERIC.md) for detailed instructions on training
 
 # Evaluation only with force predictions
 ./run.sh --action eval --dataset DFC2023S --force_predictions
+
+# Model comparison (results stored separately)
+MODEL_TYPE="farsegpp" ./run.sh --action eval --dataset DFC2023S
+MODEL_TYPE="farseg" ./run.sh --action eval --dataset DFC2023S
 ```
 
 ## 📚 Documentation
@@ -173,6 +191,8 @@ See [README_GENERIC.md](README_GENERIC.md) for detailed instructions on training
 - **[documents/technical/PIPELINE_IMPROVEMENTS.md](documents/technical/PIPELINE_IMPROVEMENTS.md)**: Comprehensive pipeline improvements summary
 - **[documents/technical/RESUME_TRAINING.md](documents/technical/RESUME_TRAINING.md)**: Resume training functionality guide
 - **[documents/technical/GPU_CONFIGURATION.md](documents/technical/GPU_CONFIGURATION.md)**: GPU setup and optimization guide
+- **[documents/technical/MODEL_SEPARATION_AND_LOGGING.md](documents/technical/MODEL_SEPARATION_AND_LOGGING.md)**: Model separation and logging system guide
+- **[documents/technical/QUICK_REFERENCE.md](documents/technical/QUICK_REFERENCE.md)**: Quick reference for all new features
 
 ### Environment Files
 - `farsegpp_environment.yml`: Complete conda environment specification

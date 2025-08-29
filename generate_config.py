@@ -415,17 +415,15 @@ def main():
         use_train_valid_fusion=args.use_train_valid_fusion
     )
     
-    # Create output directory
+    # Create output directory (output_dir is already model-specific: model_type/dataset_name)
     os.makedirs(args.output_dir, exist_ok=True)
-    dataset_config_dir = os.path.join(args.output_dir, args.dataset_name)
-    os.makedirs(dataset_config_dir, exist_ok=True)
     
-    # Save Python config file
-    config_py_path = os.path.join(dataset_config_dir, f'farseg_{args.dataset_name}.py')
+    # Save Python config file directly in the output directory
+    config_py_path = os.path.join(args.output_dir, f'farseg_{args.dataset_name}.py')
     create_python_config_file(config, config_py_path, args.dataset_name)
     
     # Save JSON config for reference
-    config_json_path = os.path.join(dataset_config_dir, f'config_{args.dataset_name}.json')
+    config_json_path = os.path.join(args.output_dir, f'config_{args.dataset_name}.json')
     with open(config_json_path, 'w') as f:
         json.dump(config, f, indent=2)
     

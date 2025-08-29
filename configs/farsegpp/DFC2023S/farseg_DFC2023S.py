@@ -47,7 +47,7 @@ config = {
             },
             "annealing_softmax_focalloss": {
                 "gamma": 2.0,
-                "max_step": 150,
+                "max_step": 100,
                 "annealing_type": "cosine"
             },
         }
@@ -119,12 +119,12 @@ config = {
         "params": {
             "base_lr": 0.007,
             "power": 0.9,
-            "max_iters": 150,
+            "max_iters": 100,
         }
     },
     "train": {
         "forward_times": 1,
-        "num_iters": 150,
+        "num_iters": 100,
         "eval_per_epoch": False,
         "summary_grads": False,
         "summary_weights": False,

@@ -6,6 +6,7 @@ Uses native PyTorch AMP for mixed precision training.
 
 import os
 import sys
+import glob
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -266,7 +267,7 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
         print("🔄 Starting training from scratch...")
         return 0, 0
 
-def train_model(config_path, model_dir, gpu_ids="0", resume_from=None):
+def train_model(config_path, model_dir, gpu_ids="0", resume_from=None, save_frequency=5000, val_frequency=2000, max_iters_override=None):
     """Main training function with resume capability."""
     
     # Clear CUDA cache first
@@ -289,6 +290,12 @@ def train_model(config_path, model_dir, gpu_ids="0", resume_from=None):
     # Load config
     config = load_config(config_path)
     print(f"Loaded config from {config_path}")
+    
+    # Override max_iters if specified via command line
+    if max_iters_override is not None:
+        original_max_iters = config['train']['num_iters']
+        config['train']['num_iters'] = max_iters_override
+        print(f"🔄 Overriding max_iters: {original_max_iters} → {max_iters_override}")
     
     # Create model directory
     os.makedirs(model_dir, exist_ok=True)
@@ -340,26 +347,21 @@ def train_model(config_path, model_dir, gpu_ids="0", resume_from=None):
     # Training parameters
     max_iters = config['train']['num_iters']
     log_interval = config['train'].get('log_interval_step', 50)
-    save_interval = 5000
+    # Use passed frequency parameters or fall back to config/defaults
+    save_interval = save_frequency
+    validation_interval = val_frequency
     
     # Resume from checkpoint if specified
     start_step = 0
     start_epoch = 0
     
-    if resume_from is not None:
-        if resume_from.lower() == "latest":
-            # Find latest checkpoint automatically
-            latest_checkpoint = find_latest_checkpoint(model_dir)
-            if latest_checkpoint:
-                start_step, start_epoch = load_checkpoint(latest_checkpoint, model, optimizer, device)
-            else:
-                print("⚠️  No checkpoints found for resume. Starting from scratch.")
+    if resume_from:
+        # Find latest checkpoint automatically in the model directory
+        latest_checkpoint = find_latest_checkpoint(model_dir)
+        if latest_checkpoint:
+            start_step, start_epoch = load_checkpoint(latest_checkpoint, model, optimizer, device)
         else:
-            # Use specified checkpoint path
-            if os.path.exists(resume_from):
-                start_step, start_epoch = load_checkpoint(resume_from, model, optimizer, device)
-            else:
-                print(f"⚠️  Checkpoint not found: {resume_from}. Starting from scratch.")
+            print("⚠️  No checkpoints found for resume. Starting from scratch.")
     
     # Training loop
     model.train()
@@ -439,6 +441,7 @@ def train_model(config_path, model_dir, gpu_ids="0", resume_from=None):
             
             # Save checkpoint
             if global_step % save_interval == 0 and global_step > 0:
+                os.makedirs(model_dir, exist_ok=True)
                 checkpoint_path = os.path.join(model_dir, f"model-{global_step}.pth")
                 
                 # Create a clean state dict for saving (avoid pickle issues)
@@ -497,12 +500,18 @@ def train_model(config_path, model_dir, gpu_ids="0", resume_from=None):
 def main():
     parser = argparse.ArgumentParser(description='Train FarSeg model')
     parser.add_argument('--config', required=True, help='Config file path')
-    parser.add_argument('--model_dir', required=True, help='Model directory')
+    parser.add_argument('--model_dir', required=True, help='Model directory (for both final models and checkpoints)')
     parser.add_argument('--gpu_ids', default="0", help='GPU IDs (e.g., "0,1,2,3")')
     parser.add_argument('--validate_config', action='store_true', 
                        help='Only validate configuration and data paths, do not train')
-    parser.add_argument('--resume', type=str, default=None,
-                       help='Resume from checkpoint: "latest" to auto-find latest, or checkpoint path')
+    parser.add_argument('--resume', action='store_true',
+                       help='Resume from latest checkpoint if available')
+    parser.add_argument('--save_frequency', type=int, default=5000,
+                       help='Model saving frequency (iterations)')
+    parser.add_argument('--val_frequency', type=int, default=2000,
+                       help='Validation frequency (iterations)')
+    parser.add_argument('--max_iters', type=int, default=None,
+                       help='Override maximum training iterations from config')
     
     args = parser.parse_args()
     
@@ -512,7 +521,7 @@ def main():
         sys.exit(0 if success else 1)
     
     # Otherwise, run training
-    train_model(args.config, args.model_dir, args.gpu_ids, args.resume)
+    train_model(args.config, args.model_dir, args.gpu_ids, args.resume, args.save_frequency, args.val_frequency, args.max_iters)
 
 if __name__ == '__main__':
     main()

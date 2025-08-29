@@ -371,8 +371,8 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     
     # Check if predictions already exist (unless forcing regeneration)
     dataset_name = os.path.basename(config_path).replace('farseg_', '').replace('.py', '')
-    main_predictions_dir = os.path.join(os.path.dirname(output_dir), '..', '..', 'predictions')
-    dataset_predictions_dir = os.path.join(main_predictions_dir, dataset_name)
+    # Use the output_dir directly for model-specific structure
+    dataset_predictions_dir = os.path.join(output_dir, 'predictions')
     
     if not force_predictions and os.path.exists(dataset_predictions_dir):
         prediction_files = [f for f in os.listdir(dataset_predictions_dir) if f.endswith(('.png', '.jpg', '.jpeg', '.tif'))]
@@ -627,23 +627,21 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     samples_dir = os.path.join(output_dir, 'prediction_samples')
     save_prediction_samples(all_images, all_predictions, all_ground_truth, samples_dir)
     
-    # Save prediction masks to main predictions directory
-    dataset_name = os.path.basename(config_path).replace('farseg_', '').replace('.py', '')
-    # Get the main predictions directory from the parent of output_dir
-    main_predictions_dir = os.path.join(os.path.dirname(output_dir), '..', '..', 'predictions')
+    # Save prediction masks to output directory (model-specific structure)
+    # Create predictions subdirectory within the model-specific output directory
+    predictions_dir = os.path.join(output_dir, 'predictions')
     
     # Check if we should save predictions
-    dataset_predictions_dir = os.path.join(main_predictions_dir, dataset_name)
     existing_files = []
-    if os.path.exists(dataset_predictions_dir):
-        existing_files = [f for f in os.listdir(dataset_predictions_dir) if f.endswith(('.png', '.jpg', '.jpeg', '.tif'))]
+    if os.path.exists(predictions_dir):
+        existing_files = [f for f in os.listdir(predictions_dir) if f.endswith(('.png', '.jpg', '.jpeg', '.tif'))]
     
     should_save_predictions = force_predictions or len(existing_files) == 0
     
     if should_save_predictions:
-        predictions_dir = save_prediction_masks(all_predictions, all_ground_truth, main_predictions_dir, dataset_name, test_dataset)
+        final_predictions_dir = save_prediction_masks(all_predictions, all_ground_truth, output_dir, 'predictions', test_dataset)
     else:
-        predictions_dir = dataset_predictions_dir
+        final_predictions_dir = predictions_dir
         print(f"Skipping prediction saving - predictions already exist (use --force_predictions to regenerate)")
     
     print(f"\n💾 Results saved to:")
@@ -651,7 +649,7 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     print(f"  Text: {results_txt}")
     print(f"  Confusion matrix: {confusion_matrix_file}")
     print(f"  Sample predictions: {samples_dir}")
-    print(f"  Prediction masks: {predictions_dir}")
+    print(f"  Prediction masks: {final_predictions_dir}")
     
     print(f"\n🎉 Evaluation completed successfully!")
     return results

@@ -38,11 +38,12 @@ NUM_WORKERS=4                                  # Number of data loading workers
 IMAGE_EXTENSION=""                             # Leave empty for auto-detection (.png, .tif, .jpg)
 MASK_EXTENSION=""                             # Leave empty for auto-detection
 
-# Output Directories
-MODEL_DIR="./models"                          # Directory to save trained models
+# Output Directories (model-specific structure)
+MODEL_DIR="./models"                          # Directory to save trained models and checkpoints
 ANALYSIS_DIR="./analysis"                     # Directory to save analysis results
 CONFIG_DIR="./configs"                        # Directory for generated configs
 PREDICTIONS_DIR="./predictions"               # Directory to save prediction outputs
+LOGS_DIR="./logs"                            # Directory for execution logs
 
 # Pipeline Control Flags
 RUN_DATASET_ANALYSIS=true                    # Run dataset analysis to understand data distribution
@@ -78,6 +79,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --dataset)
             DATASET_NAME="$2"
+            shift 2
+            ;;
+        --model_type)
+            MODEL_TYPE="$2"
             shift 2
             ;;
         --max_iters)
@@ -164,9 +169,10 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --dataset DATASET_NAME      Name of the dataset (default: DFC2023S)"
+            echo "  --model_type MODEL_TYPE     Model type: farseg or farsegpp (default: farsegpp)"
             echo "  --max_iters VALUE          Maximum training iterations (default: 60000)"
-            echo "  --batch_size_train VALUE   Training batch size (default: 2)"
-            echo "  --gpu_ids VALUE            GPU IDs to use (default: 0,1)"
+            echo "  --batch_size_train VALUE   Training batch size (default: 8)"
+            echo "  --gpu_ids VALUE            GPU IDs to use (default: 0)"
             echo "  --force_predictions        Force regeneration of predictions even if they exist"
             echo "  --use_train_valid_fusion   Combine train and valid sets for training (no validation split)"
             echo "  --resume                   Resume training from latest checkpoint if available"
@@ -183,8 +189,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Examples:"
             echo "  ./run.sh --action all --dataset DFC2023mini --max_iters 60"
-            echo "  ./run.sh --action train --dataset DFC2023S --gpu_ids 0,1" 
-            echo "  ./run.sh --action eval --force_predictions"
+            echo "  ./run.sh --action train --dataset DFC2023S --model_type farseg"
+            echo "  ./run.sh --action eval --force_predictions --model_type farsegpp"
             echo "  ./run.sh --action prepare --use_train_valid_fusion"
             echo "  ./run.sh --action train --resume  # Resume from latest checkpoint"
             echo "  ./run.sh --action train --dataset DFC2023S --resume  # Resume training with dataset specification"
@@ -211,6 +217,10 @@ else
     SAVE_FREQUENCY=5000
     VAL_FREQUENCY=2000
 fi
+
+# Create timestamped log filename (after argument parsing to get correct MODEL_TYPE)
+TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+LOG_FILE="${LOGS_DIR}/${MODEL_TYPE}_${DATASET_NAME}_${TIMESTAMP}.log"
 
 echo "============================================================================="
 echo "FarSeg/FarSeg++ Training Pipeline"
@@ -254,11 +264,39 @@ print(f'✅ Ever: {ever.__version__}')
 # Set GPU visibility
 export CUDA_VISIBLE_DEVICES=$GPU_IDS
 
-# Create output directories
-mkdir -p $MODEL_DIR
-mkdir -p $ANALYSIS_DIR
-mkdir -p $CONFIG_DIR
-mkdir -p $PREDICTIONS_DIR
+# Create model-specific output directories
+mkdir -p "${MODEL_DIR}/${MODEL_TYPE}/${DATASET_NAME}"
+mkdir -p "${ANALYSIS_DIR}/${MODEL_TYPE}/${DATASET_NAME}"
+mkdir -p "${CONFIG_DIR}/${MODEL_TYPE}/${DATASET_NAME}"
+mkdir -p "${PREDICTIONS_DIR}/${MODEL_TYPE}/${DATASET_NAME}"
+mkdir -p "${LOGS_DIR}"
+
+# Create timestamped log file and start logging
+echo "🚀 Starting FarSeg Pipeline: ${MODEL_TYPE} on ${DATASET_NAME}" | tee "$LOG_FILE"
+echo "📁 Results will be saved in model-specific directories: ${MODEL_TYPE}/${DATASET_NAME}" | tee -a "$LOG_FILE"
+echo "📋 Execution log: ${LOG_FILE}" | tee -a "$LOG_FILE"
+echo "⏰ Started at: $(date)" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+
+# Function to log and execute commands
+log_and_execute() {
+    local description="$1"
+    shift
+    echo "▶️ $description" | tee -a "$LOG_FILE"
+    echo "Command: $*" | tee -a "$LOG_FILE"
+    echo "Started at: $(date)" | tee -a "$LOG_FILE"
+    
+    # Execute command and capture both stdout and stderr
+    if "$@" 2>&1 | tee -a "$LOG_FILE"; then
+        echo "✅ Completed: $description at $(date)" | tee -a "$LOG_FILE"
+        echo "" | tee -a "$LOG_FILE"
+        return 0
+    else
+        echo "❌ Failed: $description at $(date)" | tee -a "$LOG_FILE"
+        echo "" | tee -a "$LOG_FILE"
+        return 1
+    fi
+}
 
 #===============================================================================
 # STEP 1: Dataset Analysis
@@ -266,14 +304,14 @@ mkdir -p $PREDICTIONS_DIR
 
 if [ "$RUN_DATASET_ANALYSIS" = true ]; then
     echo ""
-    echo "Step 1: Analyzing dataset..."
-    echo "============================================================================="
+    echo "Step 1: Analyzing dataset..." | tee -a "$LOG_FILE"
+    echo "=============================================================================" | tee -a "$LOG_FILE"
     
     ANALYSIS_CMD="python analyze_dataset.py \
         --dataset_path $DATASET_PATH \
         --dataset_name $DATASET_NAME \
         --split train \
-        --output_dir $ANALYSIS_DIR/$DATASET_NAME"
+        --output_dir ${ANALYSIS_DIR}/${MODEL_TYPE}/${DATASET_NAME}"
     
     if [ "$SAVE_ANALYSIS_JSON" = true ]; then
         ANALYSIS_CMD="$ANALYSIS_CMD --save_json"
@@ -287,10 +325,9 @@ if [ "$RUN_DATASET_ANALYSIS" = true ]; then
         ANALYSIS_CMD="$ANALYSIS_CMD --mask_extension $MASK_EXTENSION"
     fi
     
-    echo "Running: $ANALYSIS_CMD"
-    eval $ANALYSIS_CMD
+    log_and_execute "Dataset Analysis" eval $ANALYSIS_CMD
     
-    echo "✅ Dataset analysis completed!"
+    echo "✅ Dataset analysis completed!" | tee -a "$LOG_FILE"
 fi
 
 #===============================================================================
@@ -299,8 +336,8 @@ fi
 
 if [ "$RUN_CONFIG_GEN" = true ]; then
     echo ""
-    echo "Step 2: Generating configuration files..."
-    echo "============================================================================="
+    echo "Step 2: Generating configuration files..." | tee -a "$LOG_FILE"
+    echo "=============================================================================" | tee -a "$LOG_FILE"
     
     CONFIG_CMD="python generate_config.py \
         --dataset_name $DATASET_NAME \
@@ -311,7 +348,8 @@ if [ "$RUN_CONFIG_GEN" = true ]; then
         --batch_size_train $BATCH_SIZE_TRAIN \
         --batch_size_test $BATCH_SIZE_VAL \
         --base_lr $BASE_LR \
-        --max_iters $MAX_ITERS"
+        --max_iters $MAX_ITERS \
+        --output_dir ${CONFIG_DIR}/${MODEL_TYPE}/${DATASET_NAME}"
     
     if [ -n "$CLASS_VALUES" ]; then
         CONFIG_CMD="$CONFIG_CMD --class_values $CLASS_VALUES"
@@ -321,10 +359,9 @@ if [ "$RUN_CONFIG_GEN" = true ]; then
         CONFIG_CMD="$CONFIG_CMD --use_train_valid_fusion"
     fi
     
-    echo "Running: $CONFIG_CMD"
-    eval $CONFIG_CMD
+    log_and_execute "Configuration Generation" eval $CONFIG_CMD
     
-    echo "✅ Configuration files generated!"
+    echo "✅ Configuration files generated!" | tee -a "$LOG_FILE"
 fi
 
 #===============================================================================
@@ -333,30 +370,32 @@ fi
 
 if [ "$RUN_TRAINING" = true ]; then
     echo ""
-    echo "Step 4: Training model..."
-    echo "============================================================================="
+    echo "Step 3: Training model..." | tee -a "$LOG_FILE"
+    echo "=============================================================================" | tee -a "$LOG_FILE"
     
-    CONFIG_FILE="$CONFIG_DIR/$DATASET_NAME/farseg_$DATASET_NAME.py"
-    MODEL_OUTPUT_DIR="$MODEL_DIR/$DATASET_NAME"
+    CONFIG_FILE="${CONFIG_DIR}/${MODEL_TYPE}/${DATASET_NAME}/farseg_${DATASET_NAME}.py"
+    MODEL_OUTPUT_DIR="${MODEL_DIR}/${MODEL_TYPE}/${DATASET_NAME}"
     
     # Use simplified training (train_simple.py doesn't support distributed training yet)
-    echo "Training with train_simple.py (optimized for stability)..."
+    echo "Training with train_simple.py (optimized for stability)..." | tee -a "$LOG_FILE"
     TRAIN_CMD="CUDA_VISIBLE_DEVICES=$GPU_IDS python train_simple.py \
         --config $CONFIG_FILE \
-        --model_dir $MODEL_OUTPUT_DIR"
+        --model_dir $MODEL_OUTPUT_DIR \
+        --save_frequency $SAVE_FREQUENCY \
+        --val_frequency $VAL_FREQUENCY \
+        --max_iters $MAX_ITERS"
     
     # Add resume flag if specified
     if [ "$RESUME_TRAINING" = true ]; then
-        TRAIN_CMD="$TRAIN_CMD --resume latest"
-        echo "🔄 Resuming training from latest checkpoint"
+        TRAIN_CMD="$TRAIN_CMD --resume"
+        echo "🔄 Resuming training from latest checkpoint" | tee -a "$LOG_FILE"
     else
-        echo "🆕 Starting fresh training"
+        echo "🆕 Starting fresh training" | tee -a "$LOG_FILE"
     fi
     
-    echo "Running: $TRAIN_CMD"
-    eval $TRAIN_CMD
+    log_and_execute "Model Training" eval $TRAIN_CMD
     
-    echo "✅ Model training completed!"
+    echo "✅ Model training completed!" | tee -a "$LOG_FILE"
 fi
 
 #===============================================================================
@@ -365,12 +404,12 @@ fi
 
 if [ "$RUN_EVALUATION" = true ]; then
     echo ""
-    echo "Step 5: Evaluating model..."
-    echo "============================================================================="
+    echo "Step 4: Evaluating model..." | tee -a "$LOG_FILE"
+    echo "=============================================================================" | tee -a "$LOG_FILE"
     
-    CONFIG_FILE="$CONFIG_DIR/$DATASET_NAME/farseg_$DATASET_NAME.py"
-    MODEL_OUTPUT_DIR="$MODEL_DIR/$DATASET_NAME"
-    EVAL_OUTPUT_DIR="$MODEL_OUTPUT_DIR/evaluation"
+    CONFIG_FILE="${CONFIG_DIR}/${MODEL_TYPE}/${DATASET_NAME}/farseg_${DATASET_NAME}.py"
+    MODEL_OUTPUT_DIR="${MODEL_DIR}/${MODEL_TYPE}/${DATASET_NAME}"
+    EVAL_OUTPUT_DIR="${PREDICTIONS_DIR}/${MODEL_TYPE}/${DATASET_NAME}"
     
     # Use the new generic evaluation script
     EVAL_CMD="python -u eval_simple.py \
@@ -384,10 +423,9 @@ if [ "$RUN_EVALUATION" = true ]; then
         EVAL_CMD="$EVAL_CMD --force_predictions"
     fi
     
-    echo "Running: $EVAL_CMD"
-    eval $EVAL_CMD
+    log_and_execute "Model Evaluation" eval $EVAL_CMD
     
-    echo "✅ Model evaluation completed!"
+    echo "✅ Model evaluation completed!" | tee -a "$LOG_FILE"
 fi
 
 #===============================================================================
@@ -395,34 +433,41 @@ fi
 #===============================================================================
 
 echo ""
-echo "============================================================================="
-echo "🎉 FarSeg Pipeline Completed Successfully!"
-echo "============================================================================="
-echo "Results saved in:"
-echo "  - Models: $MODEL_DIR/$DATASET_NAME"
-echo "  - Analysis: $ANALYSIS_DIR/$DATASET_NAME"
-echo "  - Configs: $CONFIG_DIR/$DATASET_NAME"
-echo "  - Predictions: $MODEL_DIR/$DATASET_NAME/evaluation/full_predictions"
-echo "============================================================================="
+echo "=============================================================================" | tee -a "$LOG_FILE"
+echo "🎉 FarSeg Pipeline Completed Successfully!" | tee -a "$LOG_FILE"
+echo "=============================================================================" | tee -a "$LOG_FILE"
+echo "Model: ${MODEL_TYPE}" | tee -a "$LOG_FILE"
+echo "Dataset: ${DATASET_NAME}" | tee -a "$LOG_FILE"
+echo "Completed at: $(date)" | tee -a "$LOG_FILE"
+echo ""
+echo "Results saved in model-specific directories:" | tee -a "$LOG_FILE"
+echo "  - Models: ${MODEL_DIR}/${MODEL_TYPE}/${DATASET_NAME}" | tee -a "$LOG_FILE"
+echo "  - Analysis: ${ANALYSIS_DIR}/${MODEL_TYPE}/${DATASET_NAME}" | tee -a "$LOG_FILE"
+echo "  - Configs: ${CONFIG_DIR}/${MODEL_TYPE}/${DATASET_NAME}" | tee -a "$LOG_FILE"
+echo "  - Predictions: ${PREDICTIONS_DIR}/${MODEL_TYPE}/${DATASET_NAME}" | tee -a "$LOG_FILE"
+echo "  - Logs: ${LOG_FILE}" | tee -a "$LOG_FILE"
+echo "=============================================================================" | tee -a "$LOG_FILE"
 
 # Display final model performance (if available)
-if [ -f "$MODEL_DIR/$DATASET_NAME/evaluation/eval_results.txt" ]; then
+if [ -f "${PREDICTIONS_DIR}/${MODEL_TYPE}/${DATASET_NAME}/eval_results.txt" ]; then
     echo ""
-    echo "Final Model Performance:"
-    echo "============================================================================="
-    cat "$MODEL_DIR/$DATASET_NAME/evaluation/eval_results.txt"
-elif [ -f "$MODEL_DIR/$DATASET_NAME/eval_results.txt" ]; then
+    echo "Final Model Performance:" | tee -a "$LOG_FILE"
+    echo "=============================================================================" | tee -a "$LOG_FILE"
+    cat "${PREDICTIONS_DIR}/${MODEL_TYPE}/${DATASET_NAME}/eval_results.txt" | tee -a "$LOG_FILE"
+elif [ -f "${MODEL_DIR}/${MODEL_TYPE}/${DATASET_NAME}/eval_results.txt" ]; then
     echo ""
-    echo "Final Model Performance:"
-    echo "============================================================================="
-    cat "$MODEL_DIR/$DATASET_NAME/eval_results.txt"
+    echo "Final Model Performance:" | tee -a "$LOG_FILE"
+    echo "=============================================================================" | tee -a "$LOG_FILE"
+    cat "${MODEL_DIR}/${MODEL_TYPE}/${DATASET_NAME}/eval_results.txt" | tee -a "$LOG_FILE"
 fi
 
 echo ""
-echo "To use the trained model for evaluation/inference, activate the environment and use:"
-echo "  conda activate $CONDA_ENV"
-echo "  python eval_simple.py --config $CONFIG_FILE --model_dir $MODEL_OUTPUT_DIR --output_dir $MODEL_OUTPUT_DIR/inference"
-echo ""
-echo "Or for quick evaluation with the existing configuration:"
-echo "  ./run.sh --action eval --dataset $DATASET_NAME"
-echo ""
+echo "To use the trained model for evaluation/inference, activate the environment and use:" | tee -a "$LOG_FILE"
+echo "  conda activate $CONDA_ENV" | tee -a "$LOG_FILE"
+echo "  python eval_simple.py --config ${CONFIG_DIR}/${MODEL_TYPE}/${DATASET_NAME}/farseg_${DATASET_NAME}.py --model_dir ${MODEL_DIR}/${MODEL_TYPE}/${DATASET_NAME} --output_dir ${PREDICTIONS_DIR}/${MODEL_TYPE}/${DATASET_NAME}/inference" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+echo "Or for quick evaluation with the existing configuration:" | tee -a "$LOG_FILE"
+echo "  ./run.sh --action eval --dataset $DATASET_NAME --model_type $MODEL_TYPE" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+
+echo "📋 Complete execution log saved to: ${LOG_FILE}"
