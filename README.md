@@ -135,12 +135,49 @@ bash run.sh
 
 See [README_GENERIC.md](README_GENERIC.md) for detailed instructions on training with custom datasets.
 
+## ⚡ Recent Pipeline Improvements (2025)
+
+### Key Features Added
+- **Action-Based Control**: `--action all|train|eval|prepare` for fine-grained pipeline control
+- **Resume Training**: Simple `--resume` flag for continuing interrupted training
+- **Train+Valid Fusion**: Manuscript-compliant training strategy combining train and validation splits
+- **Progress Tracking**: Real-time progress bars with fixed output buffering
+- **GPU Optimization**: Single GPU training with memory management and batch size recommendations
+
+### Hardware Configuration
+- **GPU Support**: Single GPU training (train_simple.py limitation)
+- **Multi-GPU**: Not supported in current implementation (planned for future)
+- **Memory Management**: Optimized batch sizes for stable single GPU training
+- **Recommended**: RTX 3080+ (12GB+ VRAM) for optimal performance
+
+### Usage Examples
+```bash
+# Complete pipeline with resume capability
+./run.sh --action all --dataset DFC2023S --resume --batch_size_train 8
+
+# Training only with train+valid fusion
+./run.sh --action train --dataset DFC2023S --use_train_valid_fusion
+
+# Evaluation only with force predictions
+./run.sh --action eval --dataset DFC2023S --force_predictions
+```
+
 ## 📚 Documentation
 
+### Core Documentation
 - **[USAGE_GUIDE.md](USAGE_GUIDE.md)**: Complete usage guide for the automated pipeline
 - **[README_GENERIC.md](README_GENERIC.md)**: Generic dataset training framework
 - **[ENVIRONMENT.md](ENVIRONMENT.md)**: Complete environment setup and troubleshooting
-- **Environment Files**: `farsegpp_environment.yml`, `farsegpp_conda_packages.txt`, `farsegpp_pip_packages.txt`
+
+### Technical Documentation (2025)
+- **[documents/technical/PIPELINE_IMPROVEMENTS.md](documents/technical/PIPELINE_IMPROVEMENTS.md)**: Comprehensive pipeline improvements summary
+- **[documents/technical/RESUME_TRAINING.md](documents/technical/RESUME_TRAINING.md)**: Resume training functionality guide
+- **[documents/technical/GPU_CONFIGURATION.md](documents/technical/GPU_CONFIGURATION.md)**: GPU setup and optimization guide
+
+### Environment Files
+- `farsegpp_environment.yml`: Complete conda environment specification
+- `farsegpp_conda_packages.txt`: Conda package list
+- `farsegpp_pip_packages.txt`: Pip package list
 
 ## 🔧 Environment Management
 

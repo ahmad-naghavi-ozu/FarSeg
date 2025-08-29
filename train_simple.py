@@ -83,17 +83,42 @@ def custom_collate_fn(batch):
 
 def build_dataset(config, split='train'):
     """Build dataset from config."""
-    from data.generic_dataset import GenericSegmentationDataset
+    from data.generic_dataset import GenericSegmentationDataset, GenericFusionSegmentationDataset
     
     dataset_config = config['data'][split]['params']
-    return GenericSegmentationDataset(
-        image_dir=dataset_config['image_dir'],
-        mask_dir=dataset_config['mask_dir'],
-        patch_config=dataset_config['patch_config'],
-        transforms=dataset_config['transforms'],
-        image_extension='.tif',
-        mask_extension='.tif'
-    )
+    dataloader_type = config['data'][split]['type']
+    
+    if dataloader_type == 'GenericFusionSegmentationDataLoader':
+        # Handle fusion dataset with multiple directories
+        image_dirs = dataset_config['image_dir']
+        mask_dirs = dataset_config['mask_dir']
+        
+        # Convert string representation to actual list if needed
+        if isinstance(image_dirs, str):
+            import ast
+            image_dirs = ast.literal_eval(image_dirs)
+        if isinstance(mask_dirs, str):
+            import ast
+            mask_dirs = ast.literal_eval(mask_dirs)
+            
+        return GenericFusionSegmentationDataset(
+            image_dirs=image_dirs,
+            mask_dirs=mask_dirs,
+            patch_config=dataset_config['patch_config'],
+            transforms=dataset_config['transforms'],
+            image_extension='.tif',
+            mask_extension='.tif'
+        )
+    else:
+        # Handle regular dataset with single directory
+        return GenericSegmentationDataset(
+            image_dir=dataset_config['image_dir'],
+            mask_dir=dataset_config['mask_dir'],
+            patch_config=dataset_config['patch_config'],
+            transforms=dataset_config['transforms'],
+            image_extension='.tif',
+            mask_extension='.tif'
+        )
 
 def build_optimizer(model, config):
     """Build optimizer from config."""
@@ -183,8 +208,66 @@ def validate_config(config_path):
         return False
 
 
-def train_model(config_path, model_dir, gpu_ids="0"):
-    """Main training function."""
+def find_latest_checkpoint(model_dir):
+    """Find the latest checkpoint in the model directory."""
+    import glob
+    checkpoint_pattern = os.path.join(model_dir, "model-*.pth")
+    checkpoints = glob.glob(checkpoint_pattern)
+    
+    if not checkpoints:
+        return None
+    
+    # Extract step numbers and find the latest
+    step_numbers = []
+    for ckpt in checkpoints:
+        try:
+            # Extract step number from filename like "model-100.pth"
+            filename = os.path.basename(ckpt)
+            if filename.startswith("model-") and filename.endswith(".pth"):
+                step_str = filename[6:-4]  # Remove "model-" and ".pth"
+                step_numbers.append((int(step_str), ckpt))
+        except ValueError:
+            continue
+    
+    if not step_numbers:
+        return None
+    
+    # Return path of checkpoint with highest step number
+    latest_step, latest_path = max(step_numbers, key=lambda x: x[0])
+    return latest_path
+
+def load_checkpoint(checkpoint_path, model, optimizer, device):
+    """Load checkpoint and return resume information."""
+    print(f"🔄 Loading checkpoint from {checkpoint_path}")
+    
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        
+        # Load model state
+        model.load_state_dict(checkpoint['model_state_dict'])
+        print("✅ Model state loaded successfully")
+        
+        # Load optimizer state
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        print("✅ Optimizer state loaded successfully")
+        
+        # Get resume information
+        start_step = checkpoint.get('global_step', 0)
+        start_epoch = checkpoint.get('epoch', 0)
+        
+        print(f"📋 Resuming from:")
+        print(f"   Global step: {start_step}")
+        print(f"   Epoch: {start_epoch}")
+        
+        return start_step, start_epoch
+        
+    except Exception as e:
+        print(f"❌ Failed to load checkpoint: {e}")
+        print("🔄 Starting training from scratch...")
+        return 0, 0
+
+def train_model(config_path, model_dir, gpu_ids="0", resume_from=None):
+    """Main training function with resume capability."""
     
     # Clear CUDA cache first
     if torch.cuda.is_available():
@@ -259,12 +342,32 @@ def train_model(config_path, model_dir, gpu_ids="0"):
     log_interval = config['train'].get('log_interval_step', 50)
     save_interval = 5000
     
+    # Resume from checkpoint if specified
+    start_step = 0
+    start_epoch = 0
+    
+    if resume_from is not None:
+        if resume_from.lower() == "latest":
+            # Find latest checkpoint automatically
+            latest_checkpoint = find_latest_checkpoint(model_dir)
+            if latest_checkpoint:
+                start_step, start_epoch = load_checkpoint(latest_checkpoint, model, optimizer, device)
+            else:
+                print("⚠️  No checkpoints found for resume. Starting from scratch.")
+        else:
+            # Use specified checkpoint path
+            if os.path.exists(resume_from):
+                start_step, start_epoch = load_checkpoint(resume_from, model, optimizer, device)
+            else:
+                print(f"⚠️  Checkpoint not found: {resume_from}. Starting from scratch.")
+    
     # Training loop
     model.train()
-    global_step = 0
-    epoch = 0
+    global_step = start_step
+    epoch = start_epoch
     
-    print(f"Starting training for {max_iters} iterations...")
+    remaining_iters = max_iters - start_step
+    print(f"Starting training from step {start_step} for {remaining_iters} more iterations...")
     print(f"Device: {device}")
     print(f"Mixed precision: Enabled")
     print(f"Batch size: {batch_size}")
@@ -272,8 +375,8 @@ def train_model(config_path, model_dir, gpu_ids="0"):
     
     start_time = time.time()
     
-    # Global progress bar for overall training
-    pbar = tqdm(total=max_iters, desc="Training", unit="step")
+    # Global progress bar for overall training (adjust for resume)
+    pbar = tqdm(initial=start_step, total=max_iters, desc="Training", unit="step")
     
     while global_step < max_iters:
         epoch += 1
@@ -398,6 +501,8 @@ def main():
     parser.add_argument('--gpu_ids', default="0", help='GPU IDs (e.g., "0,1,2,3")')
     parser.add_argument('--validate_config', action='store_true', 
                        help='Only validate configuration and data paths, do not train')
+    parser.add_argument('--resume', type=str, default=None,
+                       help='Resume from checkpoint: "latest" to auto-find latest, or checkpoint path')
     
     args = parser.parse_args()
     
@@ -407,7 +512,7 @@ def main():
         sys.exit(0 if success else 1)
     
     # Otherwise, run training
-    train_model(args.config, args.model_dir, args.gpu_ids)
+    train_model(args.config, args.model_dir, args.gpu_ids, args.resume)
 
 if __name__ == '__main__':
     main()

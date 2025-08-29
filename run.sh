@@ -25,13 +25,13 @@ BACKBONE="resnet50"                            # Backbone: "resnet50", "mit_b2",
 # Training Parameters
 PATCH_SIZE=896                                 # Input patch size
 STRIDE=512                                     # Patch stride for training
-BATCH_SIZE_TRAIN=2                            # Training batch size (reduced for single GPU)
+BATCH_SIZE_TRAIN=8                            # Training batch size (reduced for single GPU)
 BATCH_SIZE_VAL=1                              # Validation batch size
 BASE_LR=0.007                                  # Base learning rate
 MAX_ITERS=60000                               # Maximum training iterations
 
 # Hardware Configuration
-GPU_IDS="0,1"                                  # GPU IDs to use (switching to GPU 3 to avoid memory conflicts)
+GPU_IDS="0"                                    # GPU ID to use (train_simple.py supports single GPU only)
 NUM_WORKERS=4                                  # Number of data loading workers
 
 # File Extensions (auto-detection if not specified)
@@ -51,6 +51,7 @@ USE_TRAIN_VALID_FUSION=true                  # Use train+valid fusion for traini
 RUN_TRAINING=true                            # Run model training
 RUN_EVALUATION=true                          # Run model evaluation after training
 FORCE_PREDICTIONS=true                       # Force regeneration of predictions even if they exist
+RESUME_TRAINING=true                        # Resume training from latest checkpoint if available
 
 #===============================================================================
 # ADVANCED PARAMETERS (usually don't need to change)
@@ -97,6 +98,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --use_train_valid_fusion)
             USE_TRAIN_VALID_FUSION=true
+            shift 1
+            ;;
+        --resume)
+            RESUME_TRAINING=true
             shift 1
             ;;
         --action)
@@ -164,6 +169,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --gpu_ids VALUE            GPU IDs to use (default: 0,1)"
             echo "  --force_predictions        Force regeneration of predictions even if they exist"
             echo "  --use_train_valid_fusion   Combine train and valid sets for training (no validation split)"
+            echo "  --resume                   Resume training from latest checkpoint if available"
             echo "  --action ACTION            Pipeline action to perform (default: all)"
             echo "  --help, -h                 Show this help message"
             echo ""
@@ -180,6 +186,8 @@ while [[ $# -gt 0 ]]; do
             echo "  ./run.sh --action train --dataset DFC2023S --gpu_ids 0,1" 
             echo "  ./run.sh --action eval --force_predictions"
             echo "  ./run.sh --action prepare --use_train_valid_fusion"
+            echo "  ./run.sh --action train --resume  # Resume from latest checkpoint"
+            echo "  ./run.sh --action train --dataset DFC2023S --resume  # Resume training with dataset specification"
             echo ""
             exit 0
             ;;
@@ -216,6 +224,7 @@ echo "Save Frequency: $SAVE_FREQUENCY"
 echo "Val Frequency: $VAL_FREQUENCY"
 echo "Train+Valid Fusion: $USE_TRAIN_VALID_FUSION"
 echo "Force Predictions: $FORCE_PREDICTIONS"
+echo "Resume Training: $RESUME_TRAINING"
 echo ""
 echo "Pipeline Actions:"
 echo "  Dataset Analysis: $RUN_DATASET_ANALYSIS"
@@ -336,6 +345,14 @@ if [ "$RUN_TRAINING" = true ]; then
         --config $CONFIG_FILE \
         --model_dir $MODEL_OUTPUT_DIR"
     
+    # Add resume flag if specified
+    if [ "$RESUME_TRAINING" = true ]; then
+        TRAIN_CMD="$TRAIN_CMD --resume latest"
+        echo "🔄 Resuming training from latest checkpoint"
+    else
+        echo "🆕 Starting fresh training"
+    fi
+    
     echo "Running: $TRAIN_CMD"
     eval $TRAIN_CMD
     
@@ -402,7 +419,10 @@ elif [ -f "$MODEL_DIR/$DATASET_NAME/eval_results.txt" ]; then
 fi
 
 echo ""
-echo "To use the trained model for inference, activate the environment and use:"
+echo "To use the trained model for evaluation/inference, activate the environment and use:"
 echo "  conda activate $CONDA_ENV"
-echo "  python inference_script.py --config $CONFIG_FILE --model_dir $MODEL_OUTPUT_DIR"
+echo "  python eval_simple.py --config $CONFIG_FILE --model_dir $MODEL_OUTPUT_DIR --output_dir $MODEL_OUTPUT_DIR/inference"
+echo ""
+echo "Or for quick evaluation with the existing configuration:"
+echo "  ./run.sh --action eval --dataset $DATASET_NAME"
 echo ""

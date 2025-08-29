@@ -47,7 +47,7 @@ config = {
             },
             "annealing_softmax_focalloss": {
                 "gamma": 2.0,
-                "max_step": 60000,
+                "max_step": 150,
                 "annealing_type": "cosine"
             },
         }
@@ -74,7 +74,7 @@ config = {
                     segm.ToTensor(True),
                     comm.THMeanStdNormalize((123.675, 116.28, 103.53), (58.395, 57.12, 57.375))
                 ],
-                "batch_size": 4,
+                "batch_size": 8,
                 "num_workers": 8,
                 "training": True
             },
@@ -119,12 +119,12 @@ config = {
         "params": {
             "base_lr": 0.007,
             "power": 0.9,
-            "max_iters": 60000,
+            "max_iters": 150,
         }
     },
     "train": {
         "forward_times": 1,
-        "num_iters": 60000,
+        "num_iters": 150,
         "eval_per_epoch": False,
         "summary_grads": False,
         "summary_weights": False,
