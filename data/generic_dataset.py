@@ -148,6 +148,61 @@ class GenericSegmentationDataset(PatchBasedDataset):
         return img_tensor, y
 
 
+class GenericFusionSegmentationDataset(PatchBasedDataset):
+    def __init__(self,
+                 image_dirs,
+                 mask_dirs,
+                 patch_config=DEFAULT_PATCH_CONFIG,
+                 transforms=None,
+                 image_extension='.png',
+                 mask_extension='.png'):
+        """
+        Fusion dataset that combines multiple directories (e.g., train + valid)
+        
+        Args:
+            image_dirs: List of paths to RGB images (e.g., ['dataset/train/rgb', 'dataset/valid/rgb'])
+            mask_dirs: List of paths to semantic masks (e.g., ['dataset/train/sem', 'dataset/valid/sem'])
+            patch_config: Configuration for patch-based processing
+            transforms: List of transforms to apply
+            image_extension: File extension for images
+            mask_extension: File extension for masks
+        """
+        self.image_dirs = image_dirs if isinstance(image_dirs, list) else [image_dirs]
+        self.mask_dirs = mask_dirs if isinstance(mask_dirs, list) else [mask_dirs]
+        self.image_extension = image_extension
+        self.mask_extension = mask_extension
+        
+        # For compatibility with parent class, use the first directory
+        super(GenericFusionSegmentationDataset, self).__init__(
+            self.image_dirs[0], self.mask_dirs[0], patch_config, transforms=transforms
+        )
+
+    def generate_path_pair(self):
+        """Generate pairs of image and mask paths from multiple directories"""
+        all_pairs = []
+        
+        for image_dir, mask_dir in zip(self.image_dirs, self.mask_dirs):
+            if not os.path.exists(image_dir) or not os.path.exists(mask_dir):
+                print(f"Warning: Skipping non-existent directory pair: {image_dir}, {mask_dir}")
+                continue
+                
+            image_pattern = os.path.join(image_dir, f'*{self.image_extension}')
+            image_path_list = glob.glob(image_pattern)
+            
+            for img_path in image_path_list:
+                img_name = os.path.basename(img_path)
+                # Remove extension and add mask extension
+                mask_name = os.path.splitext(img_name)[0] + self.mask_extension
+                mask_path = os.path.join(mask_dir, mask_name)
+                if os.path.exists(mask_path):
+                    all_pairs.append((img_path, mask_path))
+                else:
+                    print(f"Warning: Missing mask for image {img_path}: {mask_path}")
+
+        print(f"Fusion dataset loaded {len(all_pairs)} image-mask pairs from {len(self.image_dirs)} directories")
+        return all_pairs
+
+
 @registry.DATALOADER.register('GenericSegmentationDataLoader')
 class GenericSegmentationDataLoader(DataLoader):
     def __init__(self, config):
@@ -159,6 +214,7 @@ class GenericSegmentationDataLoader(DataLoader):
         dataset_name = self.config.get('dataset_name', 'generic')
         class_values = self.config.get('class_values', None)
         num_classes = self.config.get('num_classes', 2)
+        use_fusion = self.config.get('use_fusion', False)
 
         # Setup transforms with appropriate color map remover
         transforms = self.config.transforms.copy()
@@ -167,14 +223,29 @@ class GenericSegmentationDataLoader(DataLoader):
             if 'RemoveColorMap' in str(transforms[0]):
                 transforms[0] = GenericRemoveColorMap(class_values=class_values, num_classes=num_classes)
 
-        dataset = GenericSegmentationDataset(
-            self.config.image_dir,
-            self.config.mask_dir,
-            self.config.patch_config,
-            transforms,
-            self.config.get('image_extension', '.png'),
-            self.config.get('mask_extension', '.png')
-        )
+        if use_fusion and isinstance(self.config.image_dir, list):
+            # Create fusion dataset combining multiple directories
+            dataset = GenericFusionSegmentationDataset(
+                self.config.image_dir,
+                self.config.mask_dir,
+                self.config.patch_config,
+                transforms,
+                self.config.get('image_extension', '.png'),
+                self.config.get('mask_extension', '.png')
+            )
+        else:
+            # Regular single-directory dataset
+            image_dir = self.config.image_dir[0] if isinstance(self.config.image_dir, list) else self.config.image_dir
+            mask_dir = self.config.mask_dir[0] if isinstance(self.config.mask_dir, list) else self.config.mask_dir
+            
+            dataset = GenericSegmentationDataset(
+                image_dir,
+                mask_dir,
+                self.config.patch_config,
+                transforms,
+                self.config.get('image_extension', '.png'),
+                self.config.get('mask_extension', '.png')
+            )
 
         sampler = distributed.StepDistributedSampler(dataset) if self.config.training else SequentialSampler(dataset)
 

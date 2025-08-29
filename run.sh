@@ -45,12 +45,12 @@ CONFIG_DIR="./configs"                        # Directory for generated configs
 PREDICTIONS_DIR="./predictions"               # Directory to save prediction outputs
 
 # Pipeline Control Flags
-RUN_ANALYSIS=true                             # Run dataset analysis (already completed)
-RUN_CONFIG_GEN=true                          # Generate configuration files (already completed)
-RUN_VALIDATION=true                           # Validate configuration before training (now supported by train_simple.py)
+RUN_DATASET_ANALYSIS=true                    # Run dataset analysis to understand data distribution
+RUN_CONFIG_GEN=true                          # Generate configuration files
+USE_TRAIN_VALID_FUSION=true                  # Use train+valid fusion for training (manuscript strategy)
 RUN_TRAINING=true                            # Run model training
 RUN_EVALUATION=true                          # Run model evaluation after training
-FORCE_PREDICTIONS=false                      # Force regeneration of predictions even if they exist
+FORCE_PREDICTIONS=true                       # Force regeneration of predictions even if they exist
 
 #===============================================================================
 # ADVANCED PARAMETERS (usually don't need to change)
@@ -95,30 +95,98 @@ while [[ $# -gt 0 ]]; do
             FORCE_PREDICTIONS=true
             shift 1
             ;;
+        --use_train_valid_fusion)
+            USE_TRAIN_VALID_FUSION=true
+            shift 1
+            ;;
+        --action)
+            ACTION="$2"
+            case $ACTION in
+                all)
+                    RUN_DATASET_ANALYSIS=true
+                    RUN_CONFIG_GEN=true
+                    USE_TRAIN_VALID_FUSION=true
+                    RUN_TRAINING=true
+                    RUN_EVALUATION=true
+                    ;;
+                analysis)
+                    RUN_DATASET_ANALYSIS=true
+                    RUN_CONFIG_GEN=false
+                    USE_TRAIN_VALID_FUSION=false
+                    RUN_TRAINING=false
+                    RUN_EVALUATION=false
+                    ;;
+                config)
+                    RUN_DATASET_ANALYSIS=false
+                    RUN_CONFIG_GEN=true
+                    USE_TRAIN_VALID_FUSION=true
+                    RUN_TRAINING=false
+                    RUN_EVALUATION=false
+                    ;;
+                train)
+                    RUN_DATASET_ANALYSIS=false
+                    RUN_CONFIG_GEN=false
+                    USE_TRAIN_VALID_FUSION=true
+                    RUN_TRAINING=true
+                    RUN_EVALUATION=false
+                    ;;
+                eval)
+                    RUN_DATASET_ANALYSIS=false
+                    RUN_CONFIG_GEN=false
+                    USE_TRAIN_VALID_FUSION=false
+                    RUN_TRAINING=false
+                    RUN_EVALUATION=true
+                    ;;
+                prepare)
+                    RUN_DATASET_ANALYSIS=true
+                    RUN_CONFIG_GEN=true
+                    USE_TRAIN_VALID_FUSION=true
+                    RUN_TRAINING=false
+                    RUN_EVALUATION=false
+                    ;;
+                *)
+                    echo "Unknown action: $ACTION"
+                    echo "Valid actions: all, analysis, config, train, eval, prepare"
+                    exit 1
+                    ;;
+            esac
+            shift 2
+            ;;
         --help|-h)
             echo "FarSeg/FarSeg++ Training Pipeline"
             echo ""
             echo "Usage: ./run.sh [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --dataset DATASET_NAME      Name of the dataset (default: DFC2023mini)"
+            echo "  --dataset DATASET_NAME      Name of the dataset (default: DFC2023S)"
             echo "  --max_iters VALUE          Maximum training iterations (default: 60000)"
             echo "  --batch_size_train VALUE   Training batch size (default: 2)"
-            echo "  --gpu_ids VALUE            GPU IDs to use (default: 2)"
+            echo "  --gpu_ids VALUE            GPU IDs to use (default: 0,1)"
             echo "  --force_predictions        Force regeneration of predictions even if they exist"
+            echo "  --use_train_valid_fusion   Combine train and valid sets for training (no validation split)"
+            echo "  --action ACTION            Pipeline action to perform (default: all)"
             echo "  --help, -h                 Show this help message"
             echo ""
-            echo "Example:"
-            echo "  ./run.sh --dataset DFC2023mini --max_iters 60 --batch_size_train 4"
-            echo "  ./run.sh --dataset DFC2023S --gpu_ids 0,1 --force_predictions"
+            echo "Actions:"
+            echo "  all       - Run complete pipeline (analysis + config + train + eval)"
+            echo "  analysis  - Run dataset analysis only" 
+            echo "  config    - Generate configuration files only"
+            echo "  train     - Run model training only (with train+valid fusion)"
+            echo "  eval      - Run model evaluation only (on test split)"
+            echo "  prepare   - Run preparation steps (analysis + config)"
+            echo ""
+            echo "Examples:"
+            echo "  ./run.sh --action all --dataset DFC2023mini --max_iters 60"
+            echo "  ./run.sh --action train --dataset DFC2023S --gpu_ids 0,1" 
+            echo "  ./run.sh --action eval --force_predictions"
+            echo "  ./run.sh --action prepare --use_train_valid_fusion"
             echo ""
             exit 0
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: ./run.sh [--dataset DATASET_NAME] [--max_iters VALUE] [--batch_size_train VALUE] [--gpu_ids VALUE]"
-            echo "Example: ./run.sh --dataset DFC2023mini --max_iters 60 --batch_size_train 4"
-            echo "Use --help for more information."
+            echo "Usage: ./run.sh [OPTIONS]"
+            echo "Use --help for detailed information about available options and actions."
             exit 1
             ;;
     esac
@@ -146,6 +214,14 @@ echo "GPU(s): $GPU_IDS"
 echo "Max Iterations: $MAX_ITERS"
 echo "Save Frequency: $SAVE_FREQUENCY"
 echo "Val Frequency: $VAL_FREQUENCY"
+echo "Train+Valid Fusion: $USE_TRAIN_VALID_FUSION"
+echo "Force Predictions: $FORCE_PREDICTIONS"
+echo ""
+echo "Pipeline Actions:"
+echo "  Dataset Analysis: $RUN_DATASET_ANALYSIS"
+echo "  Config Generation: $RUN_CONFIG_GEN"  
+echo "  Training: $RUN_TRAINING"
+echo "  Evaluation: $RUN_EVALUATION"
 echo "============================================================================="
 
 # Activate conda environment
@@ -179,7 +255,7 @@ mkdir -p $PREDICTIONS_DIR
 # STEP 1: Dataset Analysis
 #===============================================================================
 
-if [ "$RUN_ANALYSIS" = true ]; then
+if [ "$RUN_DATASET_ANALYSIS" = true ]; then
     echo ""
     echo "Step 1: Analyzing dataset..."
     echo "============================================================================="
@@ -232,6 +308,10 @@ if [ "$RUN_CONFIG_GEN" = true ]; then
         CONFIG_CMD="$CONFIG_CMD --class_values $CLASS_VALUES"
     fi
     
+    if [ "$USE_TRAIN_VALID_FUSION" = true ]; then
+        CONFIG_CMD="$CONFIG_CMD --use_train_valid_fusion"
+    fi
+    
     echo "Running: $CONFIG_CMD"
     eval $CONFIG_CMD
     
@@ -239,30 +319,7 @@ if [ "$RUN_CONFIG_GEN" = true ]; then
 fi
 
 #===============================================================================
-# STEP 3: Configuration Validation
-#===============================================================================
-
-if [ "$RUN_VALIDATION" = true ]; then
-    echo ""
-    echo "Step 3: Validating configuration..."
-    echo "============================================================================="
-    
-    CONFIG_FILE="$CONFIG_DIR/$DATASET_NAME/farseg_$DATASET_NAME.py"
-    MODEL_OUTPUT_DIR="$MODEL_DIR/$DATASET_NAME"
-    
-    VALIDATION_CMD="python train_simple.py \
-        --config $CONFIG_FILE \
-        --model_dir $MODEL_OUTPUT_DIR \
-        --validate_config"
-    
-    echo "Running: $VALIDATION_CMD"
-    eval $VALIDATION_CMD
-    
-    echo "✅ Configuration validation completed!"
-fi
-
-#===============================================================================
-# STEP 4: Model Training
+# STEP 3: Model Training
 #===============================================================================
 
 if [ "$RUN_TRAINING" = true ]; then
@@ -286,7 +343,7 @@ if [ "$RUN_TRAINING" = true ]; then
 fi
 
 #===============================================================================
-# STEP 5: Model Evaluation
+# STEP 4: Model Evaluation
 #===============================================================================
 
 if [ "$RUN_EVALUATION" = true ]; then

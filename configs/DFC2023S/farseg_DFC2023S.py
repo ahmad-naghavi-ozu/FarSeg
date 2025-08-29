@@ -47,17 +47,17 @@ config = {
             },
             "annealing_softmax_focalloss": {
                 "gamma": 2.0,
-                "max_step": 100,
+                "max_step": 60000,
                 "annealing_type": "cosine"
             },
         }
     },
     "data": {
         "train": {
-            "type": "GenericSegmentationDataLoader",
+            "type": "GenericFusionSegmentationDataLoader",
             "params": {
-                "image_dir": "/home/asfand/Ahmad/datasets/DFC2023S/train/rgb",
-                "mask_dir": "/home/asfand/Ahmad/datasets/DFC2023S/train/sem",
+                "image_dir": "['/home/asfand/Ahmad/datasets/DFC2023S/train/rgb', '/home/asfand/Ahmad/datasets/DFC2023S/valid/rgb']",
+                "mask_dir": "['/home/asfand/Ahmad/datasets/DFC2023S/train/sem', '/home/asfand/Ahmad/datasets/DFC2023S/valid/sem']",
                 "dataset_name": "DFC2023S",
                 "num_classes": 2,
                 "class_values": [0, 1],
@@ -74,7 +74,7 @@ config = {
                     segm.ToTensor(True),
                     comm.THMeanStdNormalize((123.675, 116.28, 103.53), (58.395, 57.12, 57.375))
                 ],
-                "batch_size": 2,
+                "batch_size": 4,
                 "num_workers": 8,
                 "training": True
             },
@@ -82,8 +82,8 @@ config = {
         "test": {
             "type": "GenericSegmentationDataLoader",
             "params": {
-                "image_dir": "/home/asfand/Ahmad/datasets/DFC2023S/valid/rgb",
-                "mask_dir": "/home/asfand/Ahmad/datasets/DFC2023S/valid/sem",
+                "image_dir": "/home/asfand/Ahmad/datasets/DFC2023S/test/rgb",
+                "mask_dir": "/home/asfand/Ahmad/datasets/DFC2023S/test/sem",
                 "dataset_name": "DFC2023S",
                 "num_classes": 2,
                 "class_values": [0, 1],
@@ -119,12 +119,12 @@ config = {
         "params": {
             "base_lr": 0.007,
             "power": 0.9,
-            "max_iters": 100,
+            "max_iters": 60000,
         }
     },
     "train": {
         "forward_times": 1,
-        "num_iters": 100,
+        "num_iters": 60000,
         "eval_per_epoch": False,
         "summary_grads": False,
         "summary_weights": False,

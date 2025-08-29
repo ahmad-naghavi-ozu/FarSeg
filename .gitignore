@@ -121,9 +121,11 @@ checkpoints/
 logs/
 wandb/
 .tensorboard/
+# Model artifacts and outputs
 models/
 analysis/
 predictions/
+checkpoints/
 visualization/
 
 # IDE specific

@@ -21,7 +21,8 @@ def generate_config(dataset_name: str,
                    batch_size_train: int = 4,
                    batch_size_test: int = 1,
                    base_lr: float = 0.007,
-                   max_iters: int = 60000) -> Dict[str, Any]:
+                   max_iters: int = 60000,
+                   use_train_valid_fusion: bool = False) -> Dict[str, Any]:
     """
     Generate a generic configuration for FarSeg model.
     
@@ -36,6 +37,8 @@ def generate_config(dataset_name: str,
         batch_size_test: Test batch size
         base_lr: Base learning rate
         max_iters: Maximum training iterations
+        use_train_valid_fusion: If True, combine train and valid sets for training (manuscript strategy)
+                                Testing ALWAYS uses test split regardless of this flag
     
     Returns:
         Configuration dictionary
@@ -51,6 +54,22 @@ def generate_config(dataset_name: str,
     val_mask_dir = os.path.join(data_root, dataset_name, 'valid', 'sem')
     test_image_dir = os.path.join(data_root, dataset_name, 'test', 'rgb')
     test_mask_dir = os.path.join(data_root, dataset_name, 'test', 'sem')
+    
+    # For train+valid fusion, we'll use a special multi-directory configuration
+    if use_train_valid_fusion:
+        # Training will use both train and valid directories (manuscript strategy)
+        train_image_dirs = [train_image_dir, val_image_dir]
+        train_mask_dirs = [train_mask_dir, val_mask_dir]
+        # Testing ALWAYS uses the test split only
+        test_image_dir = test_image_dir
+        test_mask_dir = test_mask_dir
+    else:
+        # Normal configuration - train on train split only
+        train_image_dirs = train_image_dir
+        train_mask_dirs = train_mask_dir
+        # Testing ALWAYS uses the test split only
+        test_image_dir = test_image_dir
+        test_mask_dir = test_mask_dir
     
     config = {
         'model': {
@@ -100,10 +119,10 @@ def generate_config(dataset_name: str,
         },
         'data': {
             'train': {
-                'type': 'GenericSegmentationDataLoader',
+                'type': 'GenericFusionSegmentationDataLoader' if use_train_valid_fusion else 'GenericSegmentationDataLoader',
                 'params': {
-                    'image_dir': train_image_dir,
-                    'mask_dir': train_mask_dir,
+                    'image_dir': train_image_dirs,
+                    'mask_dir': train_mask_dirs,
                     'dataset_name': dataset_name,
                     'num_classes': num_classes,
                     'class_values': class_values,
@@ -120,8 +139,8 @@ def generate_config(dataset_name: str,
             'test': {
                 'type': 'GenericSegmentationDataLoader',
                 'params': {
-                    'image_dir': val_image_dir,
-                    'mask_dir': val_mask_dir,
+                    'image_dir': test_image_dir,
+                    'mask_dir': test_mask_dir,
                     'dataset_name': dataset_name,
                     'num_classes': num_classes,
                     'class_values': class_values,
@@ -235,7 +254,7 @@ config = {{
     }},
     "data": {{
         "train": {{
-            "type": "GenericSegmentationDataLoader",
+            "type": "{train_dataloader_type}",
             "params": {{
                 "image_dir": "{train_image_dir}",
                 "mask_dir": "{train_mask_dir}",
@@ -329,6 +348,7 @@ config = {{
         dataset_name=dataset_name,
         num_classes=model_params['num_classes'],
         max_iters=config['learning_rate']['params']['max_iters'],
+        train_dataloader_type=config['data']['train']['type'],
         train_image_dir=train_params['image_dir'],
         train_mask_dir=train_params['mask_dir'],
         val_image_dir=test_params['image_dir'],
@@ -369,6 +389,8 @@ def main():
                        help='Maximum training iterations (default: 60000)')
     parser.add_argument('--output_dir', type=str, default='./configs',
                        help='Output directory for config files (default: ./configs)')
+    parser.add_argument('--use_train_valid_fusion', action='store_true',
+                       help='Combine train and valid sets for training (no validation split)')
     
     args = parser.parse_args()
     
@@ -389,7 +411,8 @@ def main():
         batch_size_train=args.batch_size_train,
         batch_size_test=args.batch_size_test,
         base_lr=args.base_lr,
-        max_iters=args.max_iters
+        max_iters=args.max_iters,
+        use_train_valid_fusion=args.use_train_valid_fusion
     )
     
     # Create output directory
