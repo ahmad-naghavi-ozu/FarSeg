@@ -68,7 +68,6 @@ GENERATE_PLOTS=true                          # Generate visualization plots
 # Training Parameters
 MIXED_PRECISION=true                         # Use mixed precision training
 SAVE_FREQUENCY=5000                          # Model saving frequency (iterations)
-VAL_FREQUENCY=2000                           # Validation frequency (iterations)
 
 #===============================================================================
 # PIPELINE EXECUTION - DO NOT MODIFY BELOW THIS LINE
@@ -206,16 +205,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Adjust save and validation frequencies based on max_iters
-if [ "$MAX_ITERS" -le 100 ]; then
-    SAVE_FREQUENCY=10  # Save every 10 iterations for debugging
-    VAL_FREQUENCY=5    # Validate every 5 iterations
-elif [ "$MAX_ITERS" -le 1000 ]; then
-    SAVE_FREQUENCY=100
-    VAL_FREQUENCY=50
+# Adjust save frequency based on max_iters
+if [ "$MAX_ITERS" -le 5000 ]; then
+    SAVE_FREQUENCY=999999  # Large number to ensure only final model is saved
 else
-    SAVE_FREQUENCY=5000
-    VAL_FREQUENCY=2000
+    SAVE_FREQUENCY=5000    # Save every 5000 iterations + final model
 fi
 
 # Create timestamped log filename (after argument parsing to get correct MODEL_TYPE)
@@ -382,7 +376,6 @@ if [ "$RUN_TRAINING" = true ]; then
         --config $CONFIG_FILE \
         --model_dir $MODEL_OUTPUT_DIR \
         --save_frequency $SAVE_FREQUENCY \
-        --val_frequency $VAL_FREQUENCY \
         --max_iters $MAX_ITERS"
     
     # Add resume flag if specified

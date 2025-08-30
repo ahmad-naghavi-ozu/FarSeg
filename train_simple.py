@@ -267,7 +267,7 @@ def load_checkpoint(checkpoint_path, model, optimizer, device):
         print("🔄 Starting training from scratch...")
         return 0, 0
 
-def train_model(config_path, model_dir, gpu_ids="0", resume_from=None, save_frequency=5000, val_frequency=2000, max_iters_override=None):
+def train_model(config_path, model_dir, gpu_ids="0", resume_from=None, save_frequency=5000, max_iters_override=None):
     """Main training function with resume capability."""
     
     # Clear CUDA cache first
@@ -349,7 +349,6 @@ def train_model(config_path, model_dir, gpu_ids="0", resume_from=None, save_freq
     log_interval = config['train'].get('log_interval_step', 50)
     # Use passed frequency parameters or fall back to config/defaults
     save_interval = save_frequency
-    validation_interval = val_frequency
     
     # Resume from checkpoint if specified
     start_step = 0
@@ -508,8 +507,6 @@ def main():
                        help='Resume from latest checkpoint if available')
     parser.add_argument('--save_frequency', type=int, default=5000,
                        help='Model saving frequency (iterations)')
-    parser.add_argument('--val_frequency', type=int, default=2000,
-                       help='Validation frequency (iterations)')
     parser.add_argument('--max_iters', type=int, default=None,
                        help='Override maximum training iterations from config')
     
@@ -521,7 +518,7 @@ def main():
         sys.exit(0 if success else 1)
     
     # Otherwise, run training
-    train_model(args.config, args.model_dir, args.gpu_ids, args.resume, args.save_frequency, args.val_frequency, args.max_iters)
+    train_model(args.config, args.model_dir, args.gpu_ids, args.resume, args.save_frequency, args.max_iters)
 
 if __name__ == '__main__':
     main()
