@@ -31,7 +31,7 @@ BASE_LR=0.007                                  # Base learning rate
 MAX_ITERS=60000                               # Maximum training iterations
 
 # Hardware Configuration
-GPU_IDS="0"                                    # GPU ID to use (train_simple.py supports single GPU only)
+GPU_IDS="2"                                    # GPU ID to use (train_simple.py supports single GPU only)
 NUM_WORKERS=4                                  # Number of data loading workers
 
 # File Extensions (auto-detection if not specified)
@@ -342,6 +342,7 @@ if [ "$RUN_CONFIG_GEN" = true ]; then
         --batch_size_test $BATCH_SIZE_VAL \
         --base_lr $BASE_LR \
         --max_iters $MAX_ITERS \
+        --model_type $MODEL_TYPE \
         --output_dir ${CONFIG_DIR}/${MODEL_TYPE}/${DATASET_NAME}"
     
     if [ -n "$CLASS_VALUES" ]; then

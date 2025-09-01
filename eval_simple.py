@@ -27,6 +27,9 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 # Add the current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Import our BuildFormer-style evaluator
+from evaluator import Evaluator
+
 def load_config(config_path):
     """Load configuration from Python file."""
     spec = importlib.util.spec_from_file_location("config", config_path)
@@ -162,6 +165,41 @@ def find_latest_checkpoint(model_dir):
     latest_iter, latest_file = checkpoint_files[-1]
     
     return os.path.join(model_dir, latest_file), latest_iter
+
+def evaluate_with_buildformer_style(all_predictions, all_ground_truth, num_classes):
+    """
+    Evaluate using BuildFormer-style global confusion matrix approach.
+    This is the recommended standard approach for segmentation evaluation.
+    """
+    print("🔬 Computing metrics using BuildFormer-style global accumulation...")
+    
+    # Initialize evaluator
+    evaluator = Evaluator(num_class=num_classes)
+    
+    # Add all samples to global confusion matrix
+    for i in tqdm(range(len(all_predictions)), desc="Accumulating confusion matrix", unit="sample"):
+        pred = all_predictions[i].numpy()
+        gt = all_ground_truth[i].numpy()
+        
+        # Exclude ignore_index pixels (255)
+        valid_mask = (gt != 255) & (gt >= 0) & (gt < num_classes)
+        if valid_mask.sum() > 0:  # Only process if there are valid pixels
+            pred_valid = pred[valid_mask]
+            gt_valid = gt[valid_mask]
+            evaluator.add_batch(gt_valid, pred_valid)
+    
+    # Get all metrics
+    metrics = evaluator.summary()
+    
+    return {
+        'iou_per_class': metrics['iou_per_class'],
+        'mean_iou': metrics['miou'],
+        'precision_per_class': metrics['precision_per_class'],
+        'recall_per_class': metrics['recall_per_class'],
+        'f1_per_class': metrics['f1_per_class'],
+        'overall_accuracy': metrics['overall_accuracy'],
+        'confusion_matrix': metrics['confusion_matrix']
+    }
 
 def calculate_iou(pred_mask, true_mask, num_classes, ignore_index=255):
     """Calculate IoU for each class."""
@@ -330,6 +368,13 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     config = load_config(config_path)
     print(f"Loaded config from {config_path}")
     
+    # Determine model type from config
+    model_type = config['model']['type']
+    if model_type == 'FarSegPP':
+        model_name = 'FarSeg++'
+    else:
+        model_name = 'FarSeg'
+    
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     
@@ -497,26 +542,28 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     
     pixel_accuracy = (valid_predictions == valid_ground_truth).float().mean().item()
     
-    # Calculate IoU for each class
-    print("🧮 Computing per-sample IoU metrics...")
-    class_ious = []
-    for i in tqdm(range(len(all_predictions)), desc="Computing IoU", unit="sample"):
-        ious = calculate_iou(all_predictions[i], all_ground_truth[i], num_classes)
-        class_ious.append(ious)
+    # ========================================
+    # Compute evaluation metrics using global confusion matrix approach
+    # ========================================
+    print("🔬 Computing evaluation metrics using global accumulation...")
+    buildformer_metrics = evaluate_with_buildformer_style(all_predictions, all_ground_truth, num_classes)    # ========================================
+    # Note: We removed the per-sample averaging comparison for clarity
+    # All metrics now use the standard global confusion matrix approach
+    # ========================================
     
-    # Average IoU across all samples
-    class_ious = np.array(class_ious)
-    mean_iou_per_class = np.nanmean(class_ious, axis=0)
-    # Calculate mean IoU only for classes that have samples
-    valid_class_ious = mean_iou_per_class[~np.isnan(mean_iou_per_class)]
-    mean_iou = np.mean(valid_class_ious) if len(valid_class_ious) > 0 else 0.0
-    
-    # Calculate confusion matrix
-    print("📊 Computing confusion matrix...")
-    conf_matrix = confusion_matrix(
-        valid_ground_truth.numpy(), 
+    # Use global metrics as primary
+    mean_iou_per_class = buildformer_metrics['iou_per_class']
+    mean_iou = buildformer_metrics['mean_iou']
+    conf_matrix = buildformer_metrics['confusion_matrix']
+
+    # Classification report
+    print("📋 Generating classification report...")
+    class_report = classification_report(
+        valid_ground_truth.numpy(),
         valid_predictions.numpy(),
-        labels=list(range(num_classes))
+        labels=list(range(num_classes)),
+        output_dict=True,
+        zero_division=0
     )
 
     # Classification report
@@ -529,7 +576,7 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
         zero_division=0
     )
 
-    # Calculate per-class metrics
+    # Calculate per-class metrics using sklearn (for compatibility)
     print("📈 Computing precision, recall, and F1 scores...")
     precision, recall, f1, support = precision_recall_fscore_support(
         valid_ground_truth.numpy(),
@@ -543,9 +590,9 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     
     # Print results
     print(f"\n📊 EVALUATION RESULTS")
-    print(f"=" * 60)
+    print(f"=" * 80)
     print(f"Dataset: {os.path.basename(config_path).replace('farseg_', '').replace('.py', '')}")
-    print(f"Model: FarSeg")
+    print(f"Model: {model_name}")
     print(f"Checkpoint: {os.path.basename(checkpoint_path)}")
     print(f"Test samples: {sample_count}")
     print(f"Evaluation time: {evaluation_time:.1f}s")
@@ -553,22 +600,23 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     print(f"Overall Metrics:")
     print(f"  Pixel Accuracy: {pixel_accuracy:.4f}")
     print(f"  Mean IoU: {mean_iou:.4f}")
+    print(f"  Overall Accuracy: {buildformer_metrics['overall_accuracy']:.4f}")
     print(f"")
     print(f"Per-Class Metrics:")
     for class_id in range(num_classes):
-        iou_val = mean_iou_per_class[class_id]
-        iou_str = f"{iou_val:.4f}" if not np.isnan(iou_val) else "N/A (no samples)"
+        iou = buildformer_metrics['iou_per_class'][class_id]
+        
         print(f"  Class {class_id}:")
-        print(f"    IoU: {iou_str}")
-        print(f"    Precision: {precision[class_id]:.4f}")
-        print(f"    Recall: {recall[class_id]:.4f}")
-        print(f"    F1-Score: {f1[class_id]:.4f}")
+        print(f"    IoU: {iou:.4f}")
+        print(f"    Precision: {buildformer_metrics['precision_per_class'][class_id]:.4f}")
+        print(f"    Recall: {buildformer_metrics['recall_per_class'][class_id]:.4f}")
+        print(f"    F1-Score: {buildformer_metrics['f1_per_class'][class_id]:.4f}")
         print(f"    Support: {support[class_id]}")
     
     # Save detailed results
     results = {
         'dataset': os.path.basename(config_path).replace('farseg_', '').replace('.py', ''),
-        'model': 'FarSeg',
+        'model': model_name,
         'checkpoint': os.path.basename(checkpoint_path),
         'trained_iterations': trained_iters,
         'test_samples': sample_count,
@@ -576,10 +624,11 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
         'metrics': {
             'pixel_accuracy': pixel_accuracy,
             'mean_iou': mean_iou,
-            'per_class_iou': mean_iou_per_class.tolist(),
-            'per_class_precision': precision.tolist(),
-            'per_class_recall': recall.tolist(),
-            'per_class_f1': f1.tolist(),
+            'overall_accuracy': buildformer_metrics['overall_accuracy'],
+            'per_class_iou': buildformer_metrics['iou_per_class'].tolist(),
+            'per_class_precision': buildformer_metrics['precision_per_class'].tolist(),
+            'per_class_recall': buildformer_metrics['recall_per_class'].tolist(),
+            'per_class_f1': buildformer_metrics['f1_per_class'].tolist(),
             'per_class_support': support.tolist()
         },
         'confusion_matrix': conf_matrix.tolist(),
@@ -594,7 +643,7 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     # Save results to text file
     results_txt = os.path.join(output_dir, 'eval_results.txt')
     with open(results_txt, 'w') as f:
-        f.write(f"FarSeg Evaluation Results\n")
+        f.write(f"{model_name} Evaluation Results\n")
         f.write(f"=" * 50 + "\n")
         f.write(f"Dataset: {results['dataset']}\n")
         f.write(f"Model: {results['model']}\n")
@@ -604,6 +653,7 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
         f.write(f"\nOverall Metrics:\n")
         f.write(f"  Pixel Accuracy: {results['metrics']['pixel_accuracy']:.4f}\n")
         f.write(f"  Mean IoU: {results['metrics']['mean_iou']:.4f}\n")
+        f.write(f"  Overall Accuracy: {results['metrics']['overall_accuracy']:.4f}\n")
         f.write(f"\nPer-Class Metrics:\n")
         for class_id in range(num_classes):
             f.write(f"  Class {class_id}:\n")
@@ -614,7 +664,9 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     
     # Save confusion matrix plot
     plt.figure(figsize=(10, 8))
-    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues')
+    # Convert to int to avoid float formatting issues
+    conf_matrix_int = conf_matrix.astype(int)
+    sns.heatmap(conf_matrix_int, annot=True, fmt='d', cmap='Blues')
     plt.title('Confusion Matrix')
     plt.xlabel('Predicted')
     plt.ylabel('Actual')

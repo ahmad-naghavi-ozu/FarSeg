@@ -22,7 +22,8 @@ def generate_config(dataset_name: str,
                    batch_size_test: int = 1,
                    base_lr: float = 0.007,
                    max_iters: int = 60000,
-                   use_train_valid_fusion: bool = False) -> Dict[str, Any]:
+                   use_train_valid_fusion: bool = False,
+                   model_type: str = "farseg") -> Dict[str, Any]:
     """
     Generate a generic configuration for FarSeg model.
     
@@ -71,9 +72,15 @@ def generate_config(dataset_name: str,
         test_image_dir = test_image_dir
         test_mask_dir = test_mask_dir
     
+    # Map model type to configuration model type
+    if model_type.lower() == "farsegpp":
+        config_model_type = "FarSegPP"
+    else:
+        config_model_type = "FarSeg"
+    
     config = {
         'model': {
-            'type': 'FarSeg',
+            'type': config_model_type,
             'params': {
                 'resnet_encoder': {
                     'resnet_type': 'resnet50',
@@ -198,6 +205,8 @@ def create_python_config_file(config: Dict[str, Any],
                             dataset_name: str):
     """Create a Python configuration file from the config dictionary."""
     
+    model_type = config['model']['type']
+    
     config_template = '''import torch.nn as nn
 from simplecv.module import fpn
 
@@ -208,7 +217,7 @@ from simplecv.api.preprocess import comm
 # Configuration for {dataset_name} dataset
 config = {{
     "model": {{
-        "type": "FarSeg",
+        "type": "{model_type}",
         "params": {{
             "resnet_encoder": {{
                 "resnet_type": "resnet50",
@@ -346,6 +355,7 @@ config = {{
     
     formatted_config = config_template.format(
         dataset_name=dataset_name,
+        model_type=model_type,
         num_classes=model_params['num_classes'],
         max_iters=config['learning_rate']['params']['max_iters'],
         train_dataloader_type=config['data']['train']['type'],
@@ -369,6 +379,9 @@ def main():
     parser = argparse.ArgumentParser(description='Generate FarSeg configuration for generic datasets')
     parser.add_argument('--dataset_name', type=str, required=True,
                        help='Name of the dataset')
+    parser.add_argument('--model_type', type=str, default='farseg',
+                       choices=['farseg', 'farsegpp'],
+                       help='Model type: farseg or farsegpp (default: farseg)')
     parser.add_argument('--num_classes', type=int, required=True,
                        help='Number of classes including background')
     parser.add_argument('--data_root', type=str, required=True,
@@ -412,7 +425,8 @@ def main():
         batch_size_test=args.batch_size_test,
         base_lr=args.base_lr,
         max_iters=args.max_iters,
-        use_train_valid_fusion=args.use_train_valid_fusion
+        use_train_valid_fusion=args.use_train_valid_fusion,
+        model_type=args.model_type
     )
     
     # Create output directory (output_dir is already model-specific: model_type/dataset_name)
