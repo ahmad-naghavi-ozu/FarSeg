@@ -198,6 +198,7 @@ def evaluate_with_buildformer_style(all_predictions, all_ground_truth, num_class
         'recall_per_class': metrics['recall_per_class'],
         'f1_per_class': metrics['f1_per_class'],
         'overall_accuracy': metrics['overall_accuracy'],
+        'frequency_weighted_iou': metrics['frequency_weighted_iou'],
         'confusion_matrix': metrics['confusion_matrix']
     }
 
@@ -535,12 +536,12 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     
     print(f"\n🔍 Computing evaluation metrics...")
     
-    # Calculate pixel-wise accuracy
+    # Get valid predictions and ground truth for sklearn metrics
     valid_mask = (all_ground_truth != 255)  # Ignore index
     valid_predictions = all_predictions[valid_mask]
     valid_ground_truth = all_ground_truth[valid_mask]
     
-    pixel_accuracy = (valid_predictions == valid_ground_truth).float().mean().item()
+    # Note: We use overall_accuracy from BuildFormer-style evaluator instead of calculating pixel accuracy separately
     
     # ========================================
     # Compute evaluation metrics using global confusion matrix approach
@@ -555,16 +556,6 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     mean_iou_per_class = buildformer_metrics['iou_per_class']
     mean_iou = buildformer_metrics['mean_iou']
     conf_matrix = buildformer_metrics['confusion_matrix']
-
-    # Classification report
-    print("📋 Generating classification report...")
-    class_report = classification_report(
-        valid_ground_truth.numpy(),
-        valid_predictions.numpy(),
-        labels=list(range(num_classes)),
-        output_dict=True,
-        zero_division=0
-    )
 
     # Classification report
     print("📋 Generating classification report...")
@@ -598,9 +589,9 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     print(f"Evaluation time: {evaluation_time:.1f}s")
     print(f"")
     print(f"Overall Metrics:")
-    print(f"  Pixel Accuracy: {pixel_accuracy:.4f}")
-    print(f"  Mean IoU: {mean_iou:.4f}")
     print(f"  Overall Accuracy: {buildformer_metrics['overall_accuracy']:.4f}")
+    print(f"  Mean IoU: {mean_iou:.4f}")
+    print(f"  Frequency Weighted IoU: {buildformer_metrics['frequency_weighted_iou']:.4f}")
     print(f"")
     print(f"Per-Class Metrics:")
     for class_id in range(num_classes):
@@ -622,9 +613,9 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
         'test_samples': sample_count,
         'evaluation_time': evaluation_time,
         'metrics': {
-            'pixel_accuracy': pixel_accuracy,
-            'mean_iou': mean_iou,
             'overall_accuracy': buildformer_metrics['overall_accuracy'],
+            'mean_iou': mean_iou,
+            'frequency_weighted_iou': buildformer_metrics['frequency_weighted_iou'],
             'per_class_iou': buildformer_metrics['iou_per_class'].tolist(),
             'per_class_precision': buildformer_metrics['precision_per_class'].tolist(),
             'per_class_recall': buildformer_metrics['recall_per_class'].tolist(),
@@ -651,9 +642,9 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
         f.write(f"Test samples: {results['test_samples']}\n")
         f.write(f"Evaluation time: {results['evaluation_time']:.1f}s\n")
         f.write(f"\nOverall Metrics:\n")
-        f.write(f"  Pixel Accuracy: {results['metrics']['pixel_accuracy']:.4f}\n")
-        f.write(f"  Mean IoU: {results['metrics']['mean_iou']:.4f}\n")
         f.write(f"  Overall Accuracy: {results['metrics']['overall_accuracy']:.4f}\n")
+        f.write(f"  Mean IoU: {results['metrics']['mean_iou']:.4f}\n")
+        f.write(f"  Frequency Weighted IoU: {results['metrics']['frequency_weighted_iou']:.4f}\n")
         f.write(f"\nPer-Class Metrics:\n")
         for class_id in range(num_classes):
             f.write(f"  Class {class_id}:\n")
