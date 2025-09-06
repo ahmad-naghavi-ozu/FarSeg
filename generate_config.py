@@ -250,15 +250,6 @@ config = {{
                 "num_groups_gn": None
             }},
             "num_classes": {num_classes},
-            "loss": {{
-                "cls_weight": 1.0,
-                "ignore_index": 255,
-            }},
-            "annealing_softmax_focalloss": {{
-                "gamma": 2.0,
-                "max_step": {max_iters},
-                "annealing_type": "cosine"
-            }},
         }}
     }},
     "data": {{
@@ -353,7 +344,38 @@ config = {{
     test_params = config['data']['test']['params']
     model_params = config['model']['params']
     
-    formatted_config = config_template.format(
+    # Generate model-specific loss configuration
+    if model_type == "FarSegPP":
+        loss_config = '''            "loss": {{
+                "objectness": {{
+                    "log_objectness_iou_sigmoid": {{}},
+                    "ignore_index": 255,
+                    "prefix": "obj_"
+                }},
+                "semantic": {{
+                    "log_objectness_iou": {{}},
+                    "ignore_index": 255,
+                }}
+            }},'''
+        annealing_config = ""  # FarSeg++ doesn't use annealing_softmax_focalloss in same way
+    else:  # FarSeg
+        loss_config = '''            "loss": {{
+                "cls_weight": 1.0,
+                "ignore_index": 255,
+            }},'''
+        annealing_config = '''            "annealing_softmax_focalloss": {{
+                "gamma": 2.0,
+                "max_step": {max_iters},
+                "annealing_type": "cosine"
+            }},'''
+    
+    # Insert loss configuration into template
+    config_template_with_loss = config_template.replace(
+        '            "num_classes": {num_classes},',
+        '            "num_classes": {num_classes},\n' + loss_config + '\n' + annealing_config
+    )
+    
+    formatted_config = config_template_with_loss.format(
         dataset_name=dataset_name,
         model_type=model_type,
         num_classes=model_params['num_classes'],

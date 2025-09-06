@@ -127,6 +127,7 @@ analysis/
 predictions/
 checkpoints/
 visualization/
+configs/
 
 # IDE specific
 .vscode/
