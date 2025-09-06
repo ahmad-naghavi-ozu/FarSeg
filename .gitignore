@@ -127,7 +127,10 @@ analysis/
 predictions/
 checkpoints/
 visualization/
-configs/
+
+# Config files - ignore all subdirectories except isaid
+configs/*/
+!configs/isaid/
 
 # IDE specific
 .vscode/
