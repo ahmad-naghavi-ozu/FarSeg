@@ -348,12 +348,20 @@ config = {{
     if model_type == "FarSegPP":
         loss_config = '''            "loss": {{
                 "objectness": {{
-                    "log_objectness_iou_sigmoid": EMPTY_DICT,
+                    "log_objectness_iou_sigmoid": {{
+                        "gamma": 0.0,
+                        "ignore_index": 255,
+                        "sigmoid": True
+                    }},
                     "ignore_index": 255,
                     "prefix": "obj_"
                 }},
                 "semantic": {{
-                    "log_objectness_iou": EMPTY_DICT,
+                    "log_objectness_iou": {{
+                        "gamma": 0.0,
+                        "ignore_index": 255,
+                        "sigmoid": False
+                    }},
                     "ignore_index": 255,
                 }}
             }},'''
@@ -392,9 +400,6 @@ config = {{
         batch_size_test=test_params['batch_size'],
         base_lr=config['learning_rate']['params']['base_lr']
     )
-    
-    # Replace EMPTY_DICT placeholder with actual empty dict
-    formatted_config = formatted_config.replace('EMPTY_DICT', '{}')
     
     with open(output_path, 'w') as f:
         f.write(formatted_config)
