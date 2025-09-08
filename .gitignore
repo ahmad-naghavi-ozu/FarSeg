@@ -126,7 +126,7 @@ models/
 analysis/
 predictions/
 checkpoints/
-visualization/
+visualizations/
 
 # Config files - ignore all auto-generated configs
 configs/*/
