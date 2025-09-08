@@ -5,8 +5,8 @@ from PIL import Image
 import simplecv as sc
 
 DEFAULT_PATCH_CONFIG = dict(
-    patch_size=896,
-    stride=512,
+    patch_size=256,
+    stride=128,
 )
 
 

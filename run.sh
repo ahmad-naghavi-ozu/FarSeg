@@ -23,8 +23,8 @@ MODEL_TYPE="farsegpp"                            # Model type: "farseg" or "fars
 BACKBONE="resnet50"                            # Backbone: "resnet50", "mit_b2", etc.
 
 # Training Parameters
-PATCH_SIZE=896                                 # Input patch size
-STRIDE=512                                     # Patch stride for training
+PATCH_SIZE=256                                 # Input patch size (optimized for 512x512 images)
+STRIDE=128                                     # Patch stride for training (50% overlap)
 BATCH_SIZE_TRAIN=8                            # Training batch size (reduced for single GPU)
 BATCH_SIZE_VAL=1                              # Validation batch size
 BASE_LR=0.007                                  # Base learning rate

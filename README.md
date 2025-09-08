@@ -99,29 +99,46 @@ pip install "protobuf<3.21"
 - Python >= 3.9 (for FarSeg++)
 - Python >= 3.6 (for original FarSeg only)
 
-### Prepare iSAID Dataset
+### Prepare Your Dataset
 
-```bash
-ln -s </path/to/iSAID> ./isaid_segm
+This repository now supports generic datasets with standardized format:
+
+```
+your_dataset/
+├── train/
+│   ├── rgb/        # RGB images
+│   └── sem/        # Segmentation masks
+├── valid/
+│   ├── rgb/
+│   └── sem/
+└── test/
+    ├── rgb/
+    └── sem/
 ```
 
-### Evaluate Model
-#### 1. download pretrained weight in this [link](https://github.com/Z-Zheng/FarSeg/releases/download/v1.0/farseg50.pth)
+Supported datasets: DFC2023, DFC2019, Huawei_Contest, and other 512×512 segmentation datasets.
 
-#### 2. move weight file to log directory
+### Train and Evaluate Model
+
+#### 1. Configure your dataset in run.sh
 ```bash
-mkdir -vp ./log/isaid_segm/farseg50
-mv ./farseg50.pth ./log/isaid_segm/farseg50/model-60000.pth
-```
-#### 3. inference on iSAID val
-```bash
-bash ./scripts/eval_farseg50.sh
+# Edit the parameters in run.sh for your dataset
+DATASET_NAME="DFC2023S"              # Your dataset name
+DATASET_PATH="/path/to/your/datasets/"
+NUM_CLASSES=2                        # Number of classes including background
+CLASS_VALUES="0,1"                   # Comma-separated class values
 ```
 
-### Train Model
+#### 2. Run training and evaluation
 ```bash
-bash ./scripts/train_farseg50.sh
+bash run.sh
 ```
+
+This will automatically:
+- Generate optimized config for 512×512 images
+- Train the model with 256×256 patches 
+- Evaluate on test set
+- Save results and checkpoints
 
 ## 🚀 Quick Start with Generic Framework
 

@@ -128,9 +128,8 @@ predictions/
 checkpoints/
 visualization/
 
-# Config files - ignore all subdirectories except isaid
+# Config files - ignore all auto-generated configs
 configs/*/
-!configs/isaid/
 
 # IDE specific
 .vscode/

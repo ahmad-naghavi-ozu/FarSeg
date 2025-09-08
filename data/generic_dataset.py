@@ -20,8 +20,8 @@ from torch.utils.data.dataset import Dataset
 from data.patch_base import PatchBasedDataset
 
 DEFAULT_PATCH_CONFIG = dict(
-    patch_size=896,
-    stride=512,
+    patch_size=256,  # Reduced from 896 to work with 512x512 images
+    stride=128,      # 50% overlap for training
 )
 
 
@@ -267,15 +267,14 @@ class GenericSegmentationDataLoader(DataLoader):
             image_extension='.png',
             mask_extension='.png',
             patch_config=dict(
-                patch_size=896,
-                stride=512,
+                patch_size=256,
+                stride=128,
             ),
             transforms=[
                 GenericRemoveColorMap(),
                 segm.RandomHorizontalFlip(0.5),
                 segm.RandomVerticalFlip(0.5),
                 segm.RandomRotate90K((0, 1, 2, 3)),
-                segm.FixedPad((896, 896), 255),
                 segm.ToTensor(True),
                 comm.THMeanStdNormalize((123.675, 116.28, 103.53), (58.395, 57.12, 57.375))
             ],
