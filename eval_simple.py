@@ -170,23 +170,42 @@ def evaluate_with_buildformer_style(all_predictions, all_ground_truth, num_class
     """
     Evaluate using BuildFormer-style global confusion matrix approach.
     This is the recommended standard approach for segmentation evaluation.
+    Now properly handles reconstructed full images for sample-based evaluation.
     """
-    print("🔬 Computing metrics using BuildFormer-style global accumulation...")
+    print("🔬 Computing metrics using BuildFormer-style global accumulation on reconstructed images...")
     
     # Initialize evaluator
     evaluator = Evaluator(num_class=num_classes)
     
-    # Add all samples to global confusion matrix
-    for i in tqdm(range(len(all_predictions)), desc="Accumulating confusion matrix", unit="sample"):
-        pred = all_predictions[i].numpy()
-        gt = all_ground_truth[i].numpy()
+    # Handle both tensor stacks (new sample-based) and lists (legacy)
+    if torch.is_tensor(all_predictions):
+        # New sample-based approach: reconstructed full images as tensor stack
+        print(f"   📊 Processing {len(all_predictions)} reconstructed full images")
         
-        # Exclude ignore_index pixels (255)
-        valid_mask = (gt != 255) & (gt >= 0) & (gt < num_classes)
-        if valid_mask.sum() > 0:  # Only process if there are valid pixels
-            pred_valid = pred[valid_mask]
-            gt_valid = gt[valid_mask]
-            evaluator.add_batch(gt_valid, pred_valid)
+        for i in tqdm(range(len(all_predictions)), desc="Accumulating confusion matrix", unit="image"):
+            pred = all_predictions[i].numpy() if torch.is_tensor(all_predictions[i]) else all_predictions[i]
+            gt = all_ground_truth[i].numpy() if torch.is_tensor(all_ground_truth[i]) else all_ground_truth[i]
+            
+            # Exclude ignore_index pixels (255)
+            valid_mask = (gt != 255) & (gt >= 0) & (gt < num_classes)
+            if valid_mask.sum() > 0:  # Only process if there are valid pixels
+                pred_valid = pred[valid_mask]
+                gt_valid = gt[valid_mask]
+                evaluator.add_batch(gt_valid, pred_valid)
+    else:
+        # Legacy patch-based approach (for backward compatibility)
+        print(f"   📊 Processing {len(all_predictions)} patches (legacy mode)")
+        
+        for i in tqdm(range(len(all_predictions)), desc="Accumulating confusion matrix", unit="patch"):
+            pred = all_predictions[i].numpy() if torch.is_tensor(all_predictions[i]) else all_predictions[i]
+            gt = all_ground_truth[i].numpy() if torch.is_tensor(all_ground_truth[i]) else all_ground_truth[i]
+            
+            # Exclude ignore_index pixels (255)
+            valid_mask = (gt != 255) & (gt >= 0) & (gt < num_classes)
+            if valid_mask.sum() > 0:  # Only process if there are valid pixels
+                pred_valid = pred[valid_mask]
+                gt_valid = gt[valid_mask]
+                evaluator.add_batch(gt_valid, pred_valid)
     
     # Get all metrics
     metrics = evaluator.summary()
@@ -351,8 +370,132 @@ def save_prediction_masks(predictions, ground_truth, output_dir, dataset_name, t
     
     return dataset_predictions_dir
 
+def reconstruct_image_from_patches(patch_predictions, patch_info_list, original_height, original_width):
+    """Reconstruct full image prediction from overlapping patches."""
+    full_prediction = np.zeros((original_height, original_width), dtype=np.float32)
+    patch_count = np.zeros((original_height, original_width), dtype=np.float32)
+    
+    for i, patch_info in enumerate(patch_info_list):
+        if i < len(patch_predictions):
+            window = patch_info['window']
+            pred_patch = patch_predictions[i].cpu().numpy().astype(np.float32)
+            
+            # Extract window coordinates
+            y1, x1, y2, x2 = window
+            
+            # Add patch to full image
+            full_prediction[y1:y2, x1:x2] += pred_patch
+            patch_count[y1:y2, x1:x2] += 1
+    
+    # Average overlapping regions
+    mask = patch_count > 0
+    full_prediction[mask] = full_prediction[mask] / patch_count[mask]
+    
+    return full_prediction.astype(np.uint8)
+
+def evaluate_sample_based(test_dataset, model, device, num_classes):
+    """
+    Sample-based evaluation: reconstruct full images from patches and compute metrics.
+    This is the correct way to evaluate segmentation models trained on patches.
+    """
+    print("🔍 Starting sample-based evaluation (reconstructing full images from patches)...")
+    
+    # Group patches by original image
+    unique_files = {}
+    for idx, item in enumerate(test_dataset._data_list):
+        image_path, mask_path, window = item
+        if mask_path:
+            filename = os.path.basename(mask_path)
+            if filename not in unique_files:
+                unique_files[filename] = {
+                    'mask_path': mask_path,
+                    'image_path': image_path,
+                    'patches': []
+                }
+            unique_files[filename]['patches'].append({
+                'window': window,
+                'dataset_index': idx
+            })
+    
+    print(f"Found {len(unique_files)} unique images with {len(test_dataset)} total patches")
+    
+    all_full_predictions = []
+    all_full_ground_truth = []
+    
+    # Process each unique image
+    for filename, file_info in tqdm(unique_files.items(), desc="Processing images", unit="image"):
+        mask_path = file_info['mask_path']
+        patches_info = file_info['patches']
+        
+        # Load original mask to get dimensions
+        original_mask = Image.open(mask_path)
+        width, height = original_mask.size
+        original_gt = np.array(original_mask)
+        
+        # Get predictions for all patches of this image
+        patch_predictions = []
+        
+        with torch.no_grad():
+            for patch_info in patches_info:
+                dataset_idx = patch_info['dataset_index']
+                
+                # Get patch from dataset
+                image_patch, target_patch = test_dataset[dataset_idx]
+                
+                # Add batch dimension and move to device
+                image_batch = image_patch.unsqueeze(0).to(device)
+                
+                # Forward pass
+                try:
+                    outputs = model(image_batch)
+                    if isinstance(outputs, dict):
+                        logits = outputs.get('seg', outputs.get('cls', outputs))
+                    else:
+                        logits = outputs
+                except:
+                    # Fallback with targets if needed
+                    target_batch = {k: v.unsqueeze(0).to(device) if torch.is_tensor(v) else v 
+                                  for k, v in target_patch.items()}
+                    outputs = model(image_batch, target_batch)
+                    if isinstance(outputs, dict):
+                        if 'pred' in outputs:
+                            logits = outputs['pred']
+                        elif 'seg' in outputs:
+                            logits = outputs['seg']
+                        elif 'cls' in outputs:
+                            logits = outputs['cls']
+                        else:
+                            outputs = model(image_batch)
+                            logits = outputs
+                    else:
+                        logits = outputs
+                
+                prediction = torch.argmax(logits, dim=1).squeeze(0)
+                patch_predictions.append(prediction)
+        
+        # Reconstruct full image from patches
+        full_prediction = reconstruct_image_from_patches(
+            patch_predictions, patches_info, height, width
+        )
+        
+        all_full_predictions.append(full_prediction)
+        all_full_ground_truth.append(original_gt)
+    
+    print(f"✅ Reconstructed {len(all_full_predictions)} full images from patches")
+    
+    # Convert to tensors for metric calculation
+    all_predictions_tensor = torch.stack([torch.from_numpy(pred) for pred in all_full_predictions])
+    all_ground_truth_tensor = torch.stack([torch.from_numpy(gt) for gt in all_full_ground_truth])
+    
+    # Compute metrics on reconstructed full images
+    buildformer_metrics = evaluate_with_buildformer_style(
+        all_predictions_tensor, all_ground_truth_tensor, num_classes
+    )
+    
+    return buildformer_metrics, all_full_predictions, all_full_ground_truth, len(unique_files)
+
 def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_path=None, force_predictions=False):
-    """Main evaluation function."""
+    """Main evaluation function with sample-based reconstruction."""
     
     # Setup GPU environment
     os.environ['CUDA_VISIBLE_DEVICES'] = gpu_ids
@@ -397,171 +540,79 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     # Build test dataset
     print("📚 Building test dataset...")
     test_dataset = build_dataset(config, 'test')
-    print(f"✅ Test dataset: {len(test_dataset)} samples")
+    print(f"✅ Test dataset: {len(test_dataset)} patches from individual images")
     
     # Get evaluation parameters
-    batch_size = config['data']['test']['params']['batch_size']
     num_classes = config['model']['params']['num_classes']
     
-    # Create data loader
-    print("🔄 Creating data loader...")
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=0,
-        pin_memory=True,
-        collate_fn=custom_collate_fn
-    )
-    print(f"✅ Data loader ready: {len(test_loader)} batches")
-    
-    # Check if predictions already exist (unless forcing regeneration)
-    dataset_name = os.path.basename(config_path).replace('farseg_', '').replace('.py', '')
-    # Use the output_dir directly for model-specific structure
-    dataset_predictions_dir = os.path.join(output_dir, 'predictions')
-    
-    if not force_predictions and os.path.exists(dataset_predictions_dir):
-        prediction_files = [f for f in os.listdir(dataset_predictions_dir) if f.endswith(('.png', '.jpg', '.jpeg', '.tif'))]
-        if len(prediction_files) > 0:
-            print(f"🎯 Found {len(prediction_files)} existing predictions in {dataset_predictions_dir}")
-            print(f"   Use --force_predictions to regenerate them")
-            print(f"   Proceeding with full evaluation to compute fresh metrics...")
-
-    # Evaluation metrics
-    all_predictions = []
-    all_ground_truth = []
-    all_images = []
-    total_loss = 0.0
-    sample_count = 0
-
-    print(f"Starting evaluation...")
+    # ========================================
+    # SAMPLE-BASED EVALUATION (CORRECT APPROACH)
+    # ========================================
+    print(f"🔬 Starting SAMPLE-BASED evaluation...")
+    print(f"This will reconstruct full images from overlapping patches.")
     print(f"Device: {device}")
-    print(f"Batch size: {batch_size}")
     print(f"Number of classes: {num_classes}")
-    print(f"🕐 Preparing evaluation loop...")
-    sys.stdout.flush()
-
+    
     start_time = time.time()
     
-    print(f"🚀 Starting model inference on {len(test_loader)} batches...")
-    sys.stdout.flush()  # Force immediate output
+    # Perform sample-based evaluation
+    buildformer_metrics, all_full_predictions, all_full_ground_truth, num_images = evaluate_sample_based(
+        test_dataset, model, device, num_classes
+    )
     
-    # Warm up the model to avoid delay on first batch
-    print(f"🔥 Warming up model...")
-    sys.stdout.flush()
-    try:
-        # Create a dummy input to warm up CUDA
-        dummy_input = torch.randn(1, 3, 224, 224).to(device)
-        with torch.no_grad():
-            _ = model(dummy_input)
-        print(f"✅ Model warmed up")
-        sys.stdout.flush()
-    except Exception as e:
-        print(f"⚠️  Warmup failed (continuing anyway): {e}")
-        sys.stdout.flush()
+    evaluation_time = time.time() - start_time
     
-    with torch.no_grad():
-        print(f"⏱️  Creating progress bar...")
-        sys.stdout.flush()
-        
-        pbar = tqdm(test_loader, desc="Evaluating", unit="batch", dynamic_ncols=True, leave=True, file=sys.stdout)
-        pbar.set_postfix({'Samples': 0, 'GPU': f'{gpu_ids}'})  # Initialize immediately
-        
-        print(f"⏱️  Starting batch processing...")
-        sys.stdout.flush()
-        
-        for batch_idx, batch in enumerate(pbar):
-            if batch_idx == 0:
-                print(f"⏱️  Processing first batch...")
-                sys.stdout.flush()
-            
-            # Handle batch format
-            images = batch[0].to(device)
-            targets_dict = batch[1]
-            
-            # Move targets to device
-            targets = {}
-            for key, value in targets_dict.items():
-                if torch.is_tensor(value):
-                    targets[key] = value.to(device)
-                else:
-                    targets[key] = value
-            
-            # Forward pass - handle inference mode properly
-            try:
-                # First try inference mode (no targets)
-                outputs = model(images)
-                if isinstance(outputs, dict):
-                    # Handle FarSeg output format
-                    logits = outputs.get('seg', outputs.get('cls', outputs))
-                else:
-                    logits = outputs
-            except:
-                # Fallback: try with targets for models that require them
-                outputs = model(images, targets)
-                if isinstance(outputs, dict):
-                    # During training/eval with targets, look for prediction outputs
-                    if 'pred' in outputs:
-                        logits = outputs['pred']
-                    elif 'seg' in outputs:
-                        logits = outputs['seg']
-                    elif 'cls' in outputs:
-                        logits = outputs['cls']
-                    else:
-                        # If it's a loss dict, try inference mode
-                        outputs = model(images)
-                        logits = outputs
-                else:
-                    logits = outputs
-            
-            predictions = torch.argmax(logits, dim=1)
-            ground_truth = targets['cls']
-            
-            # Store for metrics calculation
-            all_predictions.append(predictions.cpu())
-            all_ground_truth.append(ground_truth.cpu())
-            all_images.append(images.cpu())
-            
-            sample_count += images.size(0)
-            
-            # Update progress
-            pbar.set_postfix({'Samples': sample_count})
+    # Convert reconstructed predictions to tensor format for saving
+    all_predictions_tensor = torch.stack([torch.from_numpy(pred) for pred in all_full_predictions])
+    all_ground_truth_tensor = torch.stack([torch.from_numpy(gt) for gt in all_full_ground_truth])
     
-    pbar.close()
+    # For visualization, we'll create sample patches from the reconstructed images
+    # Take first few reconstructed images and create sample patches for visualization
+    sample_images = []
+    sample_predictions = []
+    sample_ground_truth = []
     
-    # Concatenate all predictions and ground truth
-    all_predictions = torch.cat(all_predictions, dim=0)
-    all_ground_truth = torch.cat(all_ground_truth, dim=0)
-    all_images = torch.cat(all_images, dim=0)
+    for i in range(min(5, len(all_full_predictions))):
+        # Create a dummy image tensor (we'll use ground truth shape for now)
+        dummy_image = torch.zeros(3, all_full_ground_truth[i].shape[0], all_full_ground_truth[i].shape[1])
+        sample_images.append(dummy_image)
+        sample_predictions.append(all_predictions_tensor[i])
+        sample_ground_truth.append(all_ground_truth_tensor[i])
     
-    print(f"\n🔍 Computing evaluation metrics...")
+    if sample_images:
+        sample_images_tensor = torch.stack(sample_images)
+        sample_predictions_tensor = torch.stack(sample_predictions)  
+        sample_ground_truth_tensor = torch.stack(sample_ground_truth)
+    else:
+        # Create empty tensors as fallback
+        sample_images_tensor = torch.zeros(1, 3, 512, 512)
+        sample_predictions_tensor = torch.zeros(1, 512, 512)
+        sample_ground_truth_tensor = torch.zeros(1, 512, 512)
     
-    # Get valid predictions and ground truth for sklearn metrics
-    valid_mask = (all_ground_truth != 255)  # Ignore index
-    valid_predictions = all_predictions[valid_mask]
-    valid_ground_truth = all_ground_truth[valid_mask]
-    
-    # Note: We use overall_accuracy from BuildFormer-style evaluator instead of calculating pixel accuracy separately
-    
-    # ========================================
-    # Compute evaluation metrics using global confusion matrix approach
-    # ========================================
-    print("🔬 Computing evaluation metrics using global accumulation...")
-    buildformer_metrics = evaluate_with_buildformer_style(all_predictions, all_ground_truth, num_classes)    # ========================================
-    # Note: We removed the per-sample averaging comparison for clarity
-    # All metrics now use the standard global confusion matrix approach
-    # ========================================
-    
-    # Use global metrics as primary
+    # Use sample-based metrics
     mean_iou_per_class = buildformer_metrics['iou_per_class']
     mean_iou = buildformer_metrics['mean_iou']
     conf_matrix = buildformer_metrics['confusion_matrix']
 
+    # Get valid predictions and ground truth for sklearn metrics (flattened)
+    all_valid_preds = []
+    all_valid_gt = []
+    
+    for pred, gt in zip(all_full_predictions, all_full_ground_truth):
+        valid_mask = (gt != 255)  # Ignore index
+        if valid_mask.sum() > 0:
+            all_valid_preds.extend(pred[valid_mask].tolist())
+            all_valid_gt.extend(gt[valid_mask].tolist())
+    
+    # Convert to numpy for sklearn
+    valid_predictions = np.array(all_valid_preds)
+    valid_ground_truth = np.array(all_valid_gt)
+
     # Classification report
     print("📋 Generating classification report...")
     class_report = classification_report(
-        valid_ground_truth.numpy(),
-        valid_predictions.numpy(),
+        valid_ground_truth,
+        valid_predictions,
         labels=list(range(num_classes)),
         output_dict=True,
         zero_division=0
@@ -570,14 +621,12 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     # Calculate per-class metrics using sklearn (for compatibility)
     print("📈 Computing precision, recall, and F1 scores...")
     precision, recall, f1, support = precision_recall_fscore_support(
-        valid_ground_truth.numpy(),
-        valid_predictions.numpy(),
+        valid_ground_truth,
+        valid_predictions,
         labels=list(range(num_classes)),
         average=None,
         zero_division=0
     )
-    
-    evaluation_time = time.time() - start_time
     
     # Print results
     print(f"\n📊 EVALUATION RESULTS")
@@ -585,7 +634,7 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     print(f"Dataset: {os.path.basename(config_path).replace('farseg_', '').replace('.py', '')}")
     print(f"Model: {model_name}")
     print(f"Checkpoint: {os.path.basename(checkpoint_path)}")
-    print(f"Test samples: {sample_count}")
+    print(f"Test samples: {num_images}")  # Now counts reconstructed images
     print(f"Evaluation time: {evaluation_time:.1f}s")
     print(f"")
     print(f"Overall Metrics:")
@@ -610,7 +659,7 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
         'model': model_name,
         'checkpoint': os.path.basename(checkpoint_path),
         'trained_iterations': trained_iters,
-        'test_samples': sample_count,
+        'test_samples': num_images,  # Now counts reconstructed images
         'evaluation_time': evaluation_time,
         'metrics': {
             'overall_accuracy': buildformer_metrics['overall_accuracy'],
@@ -668,7 +717,7 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     
     # Save sample predictions for evaluation visualization
     samples_dir = os.path.join(output_dir, 'prediction_samples')
-    save_prediction_samples(all_images, all_predictions, all_ground_truth, samples_dir)
+    save_prediction_samples(sample_images_tensor, sample_predictions_tensor, sample_ground_truth_tensor, samples_dir)
     
     # Save prediction masks to output directory (model-specific structure)
     # Create predictions subdirectory within the model-specific output directory
@@ -682,7 +731,7 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     should_save_predictions = force_predictions or len(existing_files) == 0
     
     if should_save_predictions:
-        final_predictions_dir = save_prediction_masks(all_predictions, all_ground_truth, output_dir, 'predictions', test_dataset)
+        final_predictions_dir = save_prediction_masks(all_predictions_tensor, all_ground_truth_tensor, output_dir, 'predictions', test_dataset)
     else:
         final_predictions_dir = predictions_dir
         print(f"Skipping prediction saving - predictions already exist (use --force_predictions to regenerate)")
