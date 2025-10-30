@@ -23,6 +23,8 @@ def generate_config(dataset_name: str,
                    base_lr: float = 0.007,
                    max_iters: int = 60000,
                    use_train_valid_fusion: bool = False,
+                   use_validation: bool = False,
+                   lr_scheduler: str = 'poly',
                    model_type: str = "farseg") -> Dict[str, Any]:
     """
     Generate a generic configuration for FarSeg model.
@@ -40,6 +42,8 @@ def generate_config(dataset_name: str,
         max_iters: Maximum training iterations
         use_train_valid_fusion: If True, combine train and valid sets for training (manuscript strategy)
                                 Testing ALWAYS uses test split regardless of this flag
+        use_validation: If True, add separate validation split configuration (for validation-based training)
+        lr_scheduler: Learning rate scheduler type ('poly', 'plateau', 'poly_warmup', 'cosine_warmup')
     
     Returns:
         Configuration dictionary
@@ -143,6 +147,25 @@ def generate_config(dataset_name: str,
                     'training': True
                 },
             },
+            # Add validation split if requested and not using fusion
+            **({'valid': {
+                'type': 'GenericSegmentationDataLoader',
+                'params': {
+                    'image_dir': val_image_dir,
+                    'mask_dir': val_mask_dir,
+                    'dataset_name': dataset_name,
+                    'num_classes': num_classes,
+                    'class_values': class_values,
+                    'patch_config': {
+                        'patch_size': patch_size,
+                        'stride': stride,
+                    },
+                    'transforms': 'TEST_TRANSFORMS',  # Will be replaced in actual config
+                    'batch_size': batch_size_test,
+                    'num_workers': 4,
+                    'training': False
+                },
+            }} if use_validation and not use_train_valid_fusion else {}),
             'test': {
                 'type': 'GenericSegmentationDataLoader',
                 'params': {
@@ -174,11 +197,18 @@ def generate_config(dataset_name: str,
             }
         },
         'learning_rate': {
-            'type': 'poly',
+            'type': lr_scheduler,
             'params': {
                 'base_lr': base_lr,
-                'power': 0.9,
-                'max_iters': max_iters,
+                **(
+                    # Parameters for polynomial scheduler
+                    {'power': 0.9, 'max_iters': max_iters} if lr_scheduler in ['poly', 'poly_warmup'] else
+                    # Parameters for plateau scheduler (validation-based)
+                    {'mode': 'max', 'factor': 0.5, 'patience': 5, 'min_lr': 1e-6} if lr_scheduler == 'plateau' else
+                    # Parameters for cosine warmup scheduler
+                    {'warmup_iters': 1000, 'eta_min': 1e-6} if lr_scheduler == 'cosine_warmup' else
+                    {}
+                )
             }
         },
         'train': {
@@ -434,6 +464,11 @@ def main():
                        help='Output directory for config files (default: ./configs)')
     parser.add_argument('--use_train_valid_fusion', action='store_true',
                        help='Combine train and valid sets for training (no validation split)')
+    parser.add_argument('--use_validation', action='store_true',
+                       help='Add validation split configuration for validation-based training')
+    parser.add_argument('--lr_scheduler', type=str, default='poly',
+                       choices=['poly', 'plateau', 'poly_warmup', 'cosine_warmup'],
+                       help='Learning rate scheduler type (default: poly)')
     
     args = parser.parse_args()
     
@@ -456,6 +491,8 @@ def main():
         base_lr=args.base_lr,
         max_iters=args.max_iters,
         use_train_valid_fusion=args.use_train_valid_fusion,
+        use_validation=args.use_validation,
+        lr_scheduler=args.lr_scheduler,
         model_type=args.model_type
     )
     
