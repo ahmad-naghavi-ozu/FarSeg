@@ -86,7 +86,8 @@ def generate_config(dataset_name: str,
         'model': {
             'type': config_model_type,
             'params': {
-                'resnet_encoder': {
+                'backbone': {
+                    'type': 'resnet',
                     'resnet_type': 'resnet50',
                     'include_conv5': True,
                     'batchnorm_trainable': True,
@@ -102,29 +103,60 @@ def generate_config(dataset_name: str,
                     'conv_block': 'fpn.default_conv_block',
                     'top_blocks': None,
                 },
-                'scene_relation': {
+                'ppm': {
                     'in_channels': 2048,
-                    'channel_list': (256, 256, 256, 256),
+                    'pool_channels': 512,
+                    'out_channels': 2048,
+                    'bins': (1, 2, 3, 6),
+                    'bottleneck_conv': '3x3',
+                    'dropout': 0.1,
+                },
+                'fs_relation': {
+                    'scene_embedding_channels': 2048,
+                    'in_channels_list': (256, 256, 256, 256),
                     'out_channels': 256,
                     'scale_aware_proj': True,
                 },
-                'decoder': {
+                'decoder_arch': 'ParallelDecoder',
+                'obj_asy_decoder': {
                     'in_channels': 256,
                     'out_channels': 128,
                     'in_feat_output_strides': (4, 8, 16, 32),
                     'out_feat_output_stride': 4,
                     'norm_fn': 'nn.BatchNorm2d',
-                    'num_groups_gn': None
+                },
+                'asy_decoder': {
+                    'in_channels': 256,
+                    'out_channels': 128,
+                    'in_feat_output_strides': (4, 8, 16, 32),
+                    'out_feat_output_stride': 4,
+                    'norm_fn': 'nn.BatchNorm2d',
                 },
                 'num_classes': num_classes,
                 'loss': {
-                    'cls_weight': 1.0,
-                    'ignore_index': 255,
-                },
-                'annealing_softmax_focalloss': {
-                    'gamma': 2.0,
-                    'max_step': max_iters,
-                    'annealing_type': 'cosine'
+                    'objectness': {
+                        'bce': {
+                            'weight': 1.0
+                        },
+                        'log_objectness_iou_sigmoid': {
+                            'gamma': 0.0,
+                            'ignore_index': 255,
+                            'sigmoid': True
+                        },
+                        'ignore_index': 255,
+                        'prefix': 'obj_'
+                    },
+                    'semantic': {
+                        'ce': {
+                            'weight': 1.0
+                        },
+                        'log_objectness_iou': {
+                            'gamma': 0.0,
+                            'ignore_index': 255,
+                            'sigmoid': False
+                        },
+                        'ignore_index': 255,
+                    }
                 },
             }
         },
@@ -249,7 +281,8 @@ config = {{
     "model": {{
         "type": "{model_type}",
         "params": {{
-            "resnet_encoder": {{
+            "backbone": {{
+                "type": "resnet",
                 "resnet_type": "resnet50",
                 "include_conv5": True,
                 "batchnorm_trainable": True,
@@ -265,21 +298,61 @@ config = {{
                 "conv_block": fpn.default_conv_block,
                 "top_blocks": None,
             }},
-            "scene_relation": {{
+            "ppm": {{
                 "in_channels": 2048,
-                "channel_list": (256, 256, 256, 256),
+                "pool_channels": 512,
+                "out_channels": 2048,
+                "bins": (1, 2, 3, 6),
+                "bottleneck_conv": "3x3",
+                "dropout": 0.1,
+            }},
+            "fs_relation": {{
+                "scene_embedding_channels": 2048,
+                "in_channels_list": (256, 256, 256, 256),
                 "out_channels": 256,
                 "scale_aware_proj": True,
             }},
-            "decoder": {{
+            "decoder_arch": "ParallelDecoder",
+            "obj_asy_decoder": {{
                 "in_channels": 256,
                 "out_channels": 128,
                 "in_feat_output_strides": (4, 8, 16, 32),
                 "out_feat_output_stride": 4,
                 "norm_fn": nn.BatchNorm2d,
-                "num_groups_gn": None
+            }},
+            "asy_decoder": {{
+                "in_channels": 256,
+                "out_channels": 128,
+                "in_feat_output_strides": (4, 8, 16, 32),
+                "out_feat_output_stride": 4,
+                "norm_fn": nn.BatchNorm2d,
             }},
             "num_classes": {num_classes},
+            "loss": {{
+                "objectness": {{
+                    "bce": {{
+                        "weight": 1.0
+                    }},
+                    "log_objectness_iou_sigmoid": {{
+                        "gamma": 0.0,
+                        "ignore_index": 255,
+                        "sigmoid": True
+                    }},
+                    "ignore_index": 255,
+                    "prefix": "obj_"
+                }},
+                "semantic": {{
+                    "ce": {{
+                        "weight": 1.0
+                    }},
+                    "log_objectness_iou": {{
+                        "gamma": 0.0,
+                        "ignore_index": 255,
+                        "sigmoid": False
+                    }},
+                    "ignore_index": 255,
+                }}
+            }},
         }}
     }},
     "data": {{
@@ -309,6 +382,7 @@ config = {{
                 "training": True
             }},
         }},
+        {valid_config_placeholder}
         "test": {{
             "type": "GenericSegmentationDataLoader",
             "params": {{
@@ -374,6 +448,46 @@ config = {{
     test_params = config['data']['test']['params']
     model_params = config['model']['params']
     
+    # Check if validation split exists
+    valid_config_str = ""
+    if 'valid' in config['data']:
+        valid_params = config['data']['valid']['params']
+        valid_config_str = '''"valid": {{{{
+            "type": "GenericSegmentationDataLoader",
+            "params": {{{{
+                "image_dir": "{}",
+                "mask_dir": "{}",
+                "dataset_name": "{}",
+                "num_classes": {},
+                "class_values": {},
+                "patch_config": {{{{
+                    "patch_size": {},
+                    "stride": {},
+                }}}},
+                "transforms": [
+                    GenericRemoveColorMap(class_values={}, num_classes={}),
+                    segm.DivisiblePad(32, 255),
+                    segm.ToTensor(True),
+                    comm.THMeanStdNormalize((123.675, 116.28, 103.53), (58.395, 57.12, 57.375))
+                ],
+                "batch_size": {},
+                "num_workers": 4,
+                "training": False
+            }}}},
+        }}}},
+        '''.format(
+            valid_params['image_dir'],
+            valid_params['mask_dir'],
+            valid_params['dataset_name'],
+            valid_params['num_classes'],
+            valid_params['class_values'],
+            valid_params['patch_config']['patch_size'],
+            valid_params['patch_config']['stride'],
+            valid_params['class_values'],
+            valid_params['num_classes'],
+            valid_params['batch_size']
+        )
+    
     # Generate model-specific loss configuration
     if model_type == "FarSegPP":
         loss_config = '''            "loss": {{
@@ -416,7 +530,10 @@ config = {{
     # Get max_iters from either learning_rate params or train config
     max_iters = config['learning_rate']['params'].get('max_iters', config['train']['num_iters'])
     
-    formatted_config = config_template_with_loss.format(
+    # Replace validation config placeholder
+    config_template_with_valid = config_template_with_loss.replace('{valid_config_placeholder}', valid_config_str)
+    
+    formatted_config = config_template_with_valid.format(
         dataset_name=dataset_name,
         model_type=model_type,
         num_classes=model_params['num_classes'],

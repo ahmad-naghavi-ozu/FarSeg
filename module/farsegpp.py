@@ -218,7 +218,9 @@ class FarSegPP(er.ERModule, MultiSegmentation):
             from module.mit import MiTEncoder
             self.en = MiTEncoder(self.config.backbone)
 
-        del self.de
+        # del self.de  # Commented out - causes AttributeError if 'de' doesn't exist
+        if hasattr(self, 'de'):
+            del self.de
         self.ppm = PyramidPoolModule(**self.config.ppm)
         self.fsr = FSRelation(**self.config.fs_relation)
 

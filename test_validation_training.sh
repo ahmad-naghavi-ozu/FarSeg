@@ -129,7 +129,9 @@ echo "==========================================================================
 
 LOG_FILE="${LOGS_DIR}/test_validation_${DATASET_NAME}_$(date '+%Y%m%d_%H%M%S').log"
 
-TRAIN_CMD="CUDA_VISIBLE_DEVICES=$GPU_IDS python train_with_validation.py \
+export CUDA_VISIBLE_DEVICES=$GPU_IDS
+
+TRAIN_CMD="python train_with_validation.py \
     --config $CONFIG_FILE \
     --model_dir $MODEL_DIR \
     --validation_interval_epochs $VALIDATION_INTERVAL_EPOCHS \
@@ -145,7 +147,7 @@ echo ""
 echo "Starting training... (logs: $LOG_FILE)"
 echo ""
 
-if $TRAIN_CMD 2>&1 | tee "$LOG_FILE"; then
+if eval $TRAIN_CMD 2>&1 | tee "$LOG_FILE"; then
     echo ""
     echo "✅ Training completed successfully!"
 else
