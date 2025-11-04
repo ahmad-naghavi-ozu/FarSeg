@@ -273,6 +273,7 @@ def validate_epoch(model, val_loader, device, num_classes, ignore_index):
     
     print(f"✅ Validation completed")
     print(f"   Mean IoU: {metrics['mean_iou']:.4f}")
+    print(f"   Per-Class IoU: {', '.join([f'Class {i}: {iou:.4f}' for i, iou in enumerate(metrics['per_class_iou'])])}")
     print(f"   Pixel Accuracy: {metrics['pixel_accuracy']:.4f}")
     if 'avg_loss' in metrics:
         print(f"   Avg Loss: {metrics['avg_loss']:.4f}")
