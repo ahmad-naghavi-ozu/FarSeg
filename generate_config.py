@@ -413,11 +413,14 @@ config = {{
         '            "num_classes": {num_classes},\n' + loss_config + '\n' + annealing_config
     )
     
+    # Get max_iters from either learning_rate params or train config
+    max_iters = config['learning_rate']['params'].get('max_iters', config['train']['num_iters'])
+    
     formatted_config = config_template_with_loss.format(
         dataset_name=dataset_name,
         model_type=model_type,
         num_classes=model_params['num_classes'],
-        max_iters=config['learning_rate']['params']['max_iters'],
+        max_iters=max_iters,
         train_dataloader_type=config['data']['train']['type'],
         train_image_dir=train_params['image_dir'],
         train_mask_dir=train_params['mask_dir'],

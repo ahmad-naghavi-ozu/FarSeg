@@ -48,11 +48,12 @@ LOGS_DIR="./logs"                            # Directory for execution logs
 # Pipeline Control Flags
 RUN_DATASET_ANALYSIS=true                    # Run dataset analysis to understand data distribution
 RUN_CONFIG_GEN=true                          # Generate configuration files
-USE_TRAIN_VALID_FUSION=true                  # Use train+valid fusion for training (manuscript strategy)
+USE_TRAIN_VALID_FUSION=false                 # Use train+valid fusion for training (manuscript strategy)
+USE_VALIDATION=true                          # Use validation-based training with early stopping (NEW)
 RUN_TRAINING=true                            # Run model training
 RUN_EVALUATION=true                          # Run model evaluation after training
 FORCE_PREDICTIONS=true                       # Force regeneration of predictions even if they exist
-RESUME_TRAINING=true                        # Resume training from latest checkpoint if available
+RESUME_TRAINING=false                        # Resume training from latest checkpoint if available
 
 #===============================================================================
 # ADVANCED PARAMETERS (usually don't need to change)
@@ -68,6 +69,12 @@ GENERATE_PLOTS=true                          # Generate visualization plots
 # Training Parameters
 MIXED_PRECISION=true                         # Use mixed precision training
 SAVE_FREQUENCY=5000                          # Model saving frequency (iterations)
+
+# Validation-Based Training Parameters (NEW)
+LR_SCHEDULER="plateau"                       # LR scheduler: poly, plateau, poly_warmup, cosine_warmup
+VALIDATION_INTERVAL_EPOCHS=1                 # Validate every N epochs
+EARLY_STOPPING_PATIENCE=10                   # Number of validations without improvement before stopping
+EARLY_STOPPING_MIN_DELTA=0.001              # Minimum improvement threshold for early stopping
 
 #===============================================================================
 # PIPELINE EXECUTION - DO NOT MODIFY BELOW THIS LINE
@@ -102,7 +109,21 @@ while [[ $# -gt 0 ]]; do
             ;;
         --use_train_valid_fusion)
             USE_TRAIN_VALID_FUSION=true
+            USE_VALIDATION=false
             shift 1
+            ;;
+        --use_validation)
+            USE_VALIDATION=true
+            USE_TRAIN_VALID_FUSION=false
+            shift 1
+            ;;
+        --lr_scheduler)
+            LR_SCHEDULER="$2"
+            shift 2
+            ;;
+        --early_stopping_patience)
+            EARLY_STOPPING_PATIENCE="$2"
+            shift 2
             ;;
         --resume)
             RESUME_TRAINING=true
@@ -114,7 +135,22 @@ while [[ $# -gt 0 ]]; do
                 all)
                     RUN_DATASET_ANALYSIS=true
                     RUN_CONFIG_GEN=true
+                    RUN_TRAINING=true
+                    RUN_EVALUATION=true
+                    ;;
+                all-fusion)
+                    RUN_DATASET_ANALYSIS=true
+                    RUN_CONFIG_GEN=true
                     USE_TRAIN_VALID_FUSION=true
+                    USE_VALIDATION=false
+                    RUN_TRAINING=true
+                    RUN_EVALUATION=true
+                    ;;
+                all-validation)
+                    RUN_DATASET_ANALYSIS=true
+                    RUN_CONFIG_GEN=true
+                    USE_TRAIN_VALID_FUSION=false
+                    USE_VALIDATION=true
                     RUN_TRAINING=true
                     RUN_EVALUATION=true
                     ;;
@@ -128,14 +164,20 @@ while [[ $# -gt 0 ]]; do
                 config)
                     RUN_DATASET_ANALYSIS=false
                     RUN_CONFIG_GEN=true
-                    USE_TRAIN_VALID_FUSION=true
                     RUN_TRAINING=false
                     RUN_EVALUATION=false
                     ;;
                 train)
                     RUN_DATASET_ANALYSIS=false
                     RUN_CONFIG_GEN=false
-                    USE_TRAIN_VALID_FUSION=true
+                    RUN_TRAINING=true
+                    RUN_EVALUATION=false
+                    ;;
+                train-validation)
+                    RUN_DATASET_ANALYSIS=false
+                    RUN_CONFIG_GEN=false
+                    USE_TRAIN_VALID_FUSION=false
+                    USE_VALIDATION=true
                     RUN_TRAINING=true
                     RUN_EVALUATION=false
                     ;;
@@ -149,13 +191,20 @@ while [[ $# -gt 0 ]]; do
                 prepare)
                     RUN_DATASET_ANALYSIS=true
                     RUN_CONFIG_GEN=true
-                    USE_TRAIN_VALID_FUSION=true
+                    RUN_TRAINING=false
+                    RUN_EVALUATION=false
+                    ;;
+                prepare-validation)
+                    RUN_DATASET_ANALYSIS=true
+                    RUN_CONFIG_GEN=true
+                    USE_TRAIN_VALID_FUSION=false
+                    USE_VALIDATION=true
                     RUN_TRAINING=false
                     RUN_EVALUATION=false
                     ;;
                 *)
                     echo "Unknown action: $ACTION"
-                    echo "Valid actions: all, analysis, config, train, eval, prepare"
+                    echo "Valid actions: all, all-fusion, all-validation, analysis, config, train, train-validation, eval, prepare, prepare-validation"
                     exit 1
                     ;;
             esac
@@ -179,12 +228,16 @@ while [[ $# -gt 0 ]]; do
             echo "  --help, -h                 Show this help message"
             echo ""
             echo "Actions:"
-            echo "  all       - Run complete pipeline (analysis + config + train + eval)"
-            echo "  analysis  - Run dataset analysis only" 
-            echo "  config    - Generate configuration files only"
-            echo "  train     - Run model training only (with train+valid fusion)"
-            echo "  eval      - Run model evaluation only (on test split)"
-            echo "  prepare   - Run preparation steps (analysis + config)"
+            echo "  all                - Run complete pipeline with validation-based training (NEW DEFAULT)"
+            echo "  all-fusion         - Run complete pipeline with train+valid fusion (manuscript strategy)"
+            echo "  all-validation     - Run complete pipeline with validation-based training (explicit)"
+            echo "  analysis           - Run dataset analysis only" 
+            echo "  config             - Generate configuration files only"
+            echo "  train              - Run model training (respects USE_VALIDATION flag)"
+            echo "  train-validation   - Run validation-based training explicitly"
+            echo "  eval               - Run model evaluation only (on test split)"
+            echo "  prepare            - Run preparation steps (analysis + config)"
+            echo "  prepare-validation - Run preparation for validation-based training"
             echo ""
             echo "Examples:"
             echo "  ./run.sh --action all --dataset DFC2023mini --max_iters 60"
@@ -226,6 +279,9 @@ echo "GPU(s): $GPU_IDS"
 echo "Max Iterations: $MAX_ITERS"
 echo "Save Frequency: $SAVE_FREQUENCY"
 echo "Train+Valid Fusion: $USE_TRAIN_VALID_FUSION"
+echo "Use Validation: $USE_VALIDATION"
+echo "LR Scheduler: $LR_SCHEDULER"
+echo "Early Stopping Patience: $EARLY_STOPPING_PATIENCE"
 echo "Force Predictions: $FORCE_PREDICTIONS"
 echo "Resume Training: $RESUME_TRAINING"
 echo ""
@@ -353,6 +409,10 @@ if [ "$RUN_CONFIG_GEN" = true ]; then
         CONFIG_CMD="$CONFIG_CMD --use_train_valid_fusion"
     fi
     
+    if [ "$USE_VALIDATION" = true ]; then
+        CONFIG_CMD="$CONFIG_CMD --use_validation --lr_scheduler $LR_SCHEDULER"
+    fi
+    
     log_and_execute "Configuration Generation" eval $CONFIG_CMD
     
     echo "✅ Configuration files generated!" | tee -a "$LOG_FILE"
@@ -370,20 +430,41 @@ if [ "$RUN_TRAINING" = true ]; then
     CONFIG_FILE="${CONFIG_DIR}/${MODEL_TYPE}/${DATASET_NAME}/farseg_${DATASET_NAME}.py"
     MODEL_OUTPUT_DIR="${MODEL_DIR}/${MODEL_TYPE}/${DATASET_NAME}"
     
-    # Use simplified training (train_simple.py doesn't support distributed training yet)
-    echo "Training with train_simple.py (optimized for stability)..." | tee -a "$LOG_FILE"
-    TRAIN_CMD="CUDA_VISIBLE_DEVICES=$GPU_IDS python train_simple.py \
-        --config $CONFIG_FILE \
-        --model_dir $MODEL_OUTPUT_DIR \
-        --save_frequency $SAVE_FREQUENCY \
-        --max_iters $MAX_ITERS"
-    
-    # Add resume flag if specified
-    if [ "$RESUME_TRAINING" = true ]; then
-        TRAIN_CMD="$TRAIN_CMD --resume"
-        echo "🔄 Resuming training from latest checkpoint" | tee -a "$LOG_FILE"
+    # Choose training script based on validation mode
+    if [ "$USE_VALIDATION" = true ]; then
+        echo "Training with train_with_validation.py (validation-based strategy)..." | tee -a "$LOG_FILE"
+        TRAIN_CMD="CUDA_VISIBLE_DEVICES=$GPU_IDS python train_with_validation.py \
+            --config $CONFIG_FILE \
+            --model_dir $MODEL_OUTPUT_DIR \
+            --validation_interval_epochs $VALIDATION_INTERVAL_EPOCHS \
+            --early_stopping_patience $EARLY_STOPPING_PATIENCE \
+            --early_stopping_min_delta $EARLY_STOPPING_MIN_DELTA \
+            --lr_scheduler $LR_SCHEDULER \
+            --max_iters $MAX_ITERS \
+            --gpu_ids $GPU_IDS"
+        
+        # Add resume flag if specified
+        if [ "$RESUME_TRAINING" = true ]; then
+            TRAIN_CMD="$TRAIN_CMD --resume_from ${MODEL_OUTPUT_DIR}/latest_model.pth"
+            echo "🔄 Resuming validation-based training from latest checkpoint" | tee -a "$LOG_FILE"
+        else
+            echo "🆕 Starting fresh validation-based training" | tee -a "$LOG_FILE"
+        fi
     else
-        echo "🆕 Starting fresh training" | tee -a "$LOG_FILE"
+        echo "Training with train_simple.py (iteration-based strategy)..." | tee -a "$LOG_FILE"
+        TRAIN_CMD="CUDA_VISIBLE_DEVICES=$GPU_IDS python train_simple.py \
+            --config $CONFIG_FILE \
+            --model_dir $MODEL_OUTPUT_DIR \
+            --save_frequency $SAVE_FREQUENCY \
+            --max_iters $MAX_ITERS"
+        
+        # Add resume flag if specified
+        if [ "$RESUME_TRAINING" = true ]; then
+            TRAIN_CMD="$TRAIN_CMD --resume"
+            echo "🔄 Resuming iteration-based training from latest checkpoint" | tee -a "$LOG_FILE"
+        else
+            echo "🆕 Starting fresh iteration-based training" | tee -a "$LOG_FILE"
+        fi
     fi
     
     log_and_execute "Model Training" eval $TRAIN_CMD
