@@ -25,7 +25,7 @@ BACKBONE="resnet50"                            # Backbone: "resnet50", "mit_b2",
 # Training Parameters
 PATCH_SIZE=256                                 # Input patch size (optimized for 512x512 images)
 STRIDE=128                                     # Patch stride for training (50% overlap)
-BATCH_SIZE_TRAIN=100                            # Training batch size (reduced for single GPU)
+BATCH_SIZE_TRAIN=8                             # Training batch size (safe for 11GB GPU with FarSegPP)
 BATCH_SIZE_VAL=1                              # Validation batch size
 BASE_LR=0.007                                  # Base learning rate
 MAX_ITERS=60000                               # Maximum training iterations
@@ -433,7 +433,8 @@ if [ "$RUN_TRAINING" = true ]; then
     # Choose training script based on validation mode
     if [ "$USE_VALIDATION" = true ]; then
         echo "Training with train_with_validation.py (validation-based strategy)..." | tee -a "$LOG_FILE"
-        TRAIN_CMD="CUDA_VISIBLE_DEVICES=$GPU_IDS python train_with_validation.py \
+        echo "Using GPU: $GPU_IDS (will be mapped to cuda:0 via CUDA_VISIBLE_DEVICES)" | tee -a "$LOG_FILE"
+        TRAIN_CMD="python train_with_validation.py \
             --config $CONFIG_FILE \
             --model_dir $MODEL_OUTPUT_DIR \
             --validation_interval_epochs $VALIDATION_INTERVAL_EPOCHS \
@@ -441,7 +442,7 @@ if [ "$RUN_TRAINING" = true ]; then
             --early_stopping_min_delta $EARLY_STOPPING_MIN_DELTA \
             --lr_scheduler $LR_SCHEDULER \
             --max_iters $MAX_ITERS \
-            --gpu_ids $GPU_IDS"
+            --gpu_ids 0"
         
         # Add resume flag if specified
         if [ "$RESUME_TRAINING" = true ]; then
@@ -452,7 +453,8 @@ if [ "$RUN_TRAINING" = true ]; then
         fi
     else
         echo "Training with train_simple.py (iteration-based strategy)..." | tee -a "$LOG_FILE"
-        TRAIN_CMD="CUDA_VISIBLE_DEVICES=$GPU_IDS python train_simple.py \
+        echo "Using GPU: $GPU_IDS" | tee -a "$LOG_FILE"
+        TRAIN_CMD="python train_simple.py \
             --config $CONFIG_FILE \
             --model_dir $MODEL_OUTPUT_DIR \
             --save_frequency $SAVE_FREQUENCY \
