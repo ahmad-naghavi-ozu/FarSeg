@@ -559,8 +559,8 @@ def main():
     parser = argparse.ArgumentParser(description='Generate FarSeg configuration for generic datasets')
     parser.add_argument('--dataset_name', type=str, required=True,
                        help='Name of the dataset')
-    parser.add_argument('--model_type', type=str, default='farseg',
-                       choices=['farseg', 'farsegpp'],
+    parser.add_argument('--model_type', type=str, default='farsegpp',
+                        choices=['farseg', 'farsegpp'],
                        help='Model type: farseg or farsegpp (default: farseg)')
     parser.add_argument('--num_classes', type=int, required=True,
                        help='Number of classes including background')

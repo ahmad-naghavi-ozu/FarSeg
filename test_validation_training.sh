@@ -10,19 +10,12 @@ echo "==========================================================================
 echo "Testing Validation-Based Training Pipeline on DFC2023mini"
 echo "============================================================================="
 
-# Configuration
+# Test Configuration
 DATASET_NAME="DFC2023mini"
-DATASET_PATH="/home/asfand/Ahmad/datasets"
-NUM_CLASSES=2
-CLASS_VALUES="0,1"
+DATA_ROOT="/home/asfand/Ahmad/datasets/DFC2023mini"
 MODEL_TYPE="farsegpp"
-PATCH_SIZE=256
-STRIDE=128
-BATCH_SIZE_TRAIN=8  # Small batch for mini dataset
-BATCH_SIZE_VAL=1
-BASE_LR=0.007
-MAX_ITERS=1000  # Small number for testing
-GPU_IDS="2"
+NUM_CLASSES=2
+GPU_IDS="0"
 
 # Validation parameters
 LR_SCHEDULER="plateau"
