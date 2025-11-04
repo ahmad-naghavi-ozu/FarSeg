@@ -448,16 +448,22 @@ def evaluate_sample_based(test_dataset, model, device, num_classes):
     
     all_full_predictions = []
     all_full_ground_truth = []
+    all_full_images = []  # Store reconstructed images
     
     # Process each unique image
     for filename, file_info in tqdm(unique_files.items(), desc="Processing images", unit="image"):
         mask_path = file_info['mask_path']
+        image_path = file_info['image_path']
         patches_info = file_info['patches']
         
         # Load original mask to get dimensions
         original_mask = Image.open(mask_path)
         width, height = original_mask.size
         original_gt = np.array(original_mask)
+        
+        # Load original image for visualization
+        original_image = Image.open(image_path)
+        original_image_array = np.array(original_image)
         
         # Get predictions for all patches of this image
         patch_predictions = []
@@ -507,6 +513,7 @@ def evaluate_sample_based(test_dataset, model, device, num_classes):
         
         all_full_predictions.append(full_prediction)
         all_full_ground_truth.append(original_gt)
+        all_full_images.append(original_image_array)
     
     print(f"✅ Reconstructed {len(all_full_predictions)} full images from patches")
     
@@ -519,7 +526,7 @@ def evaluate_sample_based(test_dataset, model, device, num_classes):
         all_predictions_tensor, all_ground_truth_tensor, num_classes
     )
     
-    return buildformer_metrics, all_full_predictions, all_full_ground_truth, len(unique_files)
+    return buildformer_metrics, all_full_predictions, all_full_ground_truth, all_full_images, len(unique_files)
 
 def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_path=None, force_predictions=False):
     """Main evaluation function with sample-based reconstruction."""
@@ -583,7 +590,7 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     start_time = time.time()
     
     # Perform sample-based evaluation
-    buildformer_metrics, all_full_predictions, all_full_ground_truth, num_images = evaluate_sample_based(
+    buildformer_metrics, all_full_predictions, all_full_ground_truth, all_full_images, num_images = evaluate_sample_based(
         test_dataset, model, device, num_classes
     )
     
@@ -593,16 +600,20 @@ def evaluate_model(config_path, model_dir, output_dir, gpu_ids="0", checkpoint_p
     all_predictions_tensor = torch.stack([torch.from_numpy(pred) for pred in all_full_predictions])
     all_ground_truth_tensor = torch.stack([torch.from_numpy(gt) for gt in all_full_ground_truth])
     
-    # For visualization, we'll create sample patches from the reconstructed images
-    # Take first few reconstructed images and create sample patches for visualization
+    # For visualization, use the actual reconstructed images
     sample_images = []
     sample_predictions = []
     sample_ground_truth = []
     
     for i in range(min(5, len(all_full_predictions))):
-        # Create a dummy image tensor (we'll use ground truth shape for now)
-        dummy_image = torch.zeros(3, all_full_ground_truth[i].shape[0], all_full_ground_truth[i].shape[1])
-        sample_images.append(dummy_image)
+        # Convert numpy image to tensor (H, W, C) -> (C, H, W)
+        image_array = all_full_images[i]
+        if len(image_array.shape) == 2:  # Grayscale
+            image_tensor = torch.from_numpy(image_array).unsqueeze(0).float()
+        else:  # RGB
+            image_tensor = torch.from_numpy(image_array).permute(2, 0, 1).float()
+        
+        sample_images.append(image_tensor)
         sample_predictions.append(all_predictions_tensor[i])
         sample_ground_truth.append(all_ground_truth_tensor[i])
     
