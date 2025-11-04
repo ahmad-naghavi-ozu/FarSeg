@@ -38,9 +38,16 @@ def load_config(config_path):
     return config_module.config
 
 def build_model(config):
-    """Build the FarSeg model from config."""
-    from module.farseg import FarSeg
-    return FarSeg(config['model']['params'])
+    """Build the FarSeg or FarSegPP model from config."""
+    model_type = config['model']['type']
+    model_params = config['model']['params']
+    
+    if model_type == 'FarSegPP':
+        from module.farsegpp import FarSegPP
+        return FarSegPP(model_params)
+    else:
+        from module.farseg import FarSeg
+        return FarSeg(model_params)
 
 def custom_collate_fn(batch):
     """Custom collate function to handle variable-sized tensors"""
@@ -142,6 +149,18 @@ def find_latest_checkpoint(model_dir):
     
     # Look for model files
     checkpoint_files = []
+    # Check for validation-based training checkpoints first (best_model.pth, latest_model.pth)
+    best_model_path = os.path.join(model_dir, 'best_model.pth')
+    latest_model_path = os.path.join(model_dir, 'latest_model.pth')
+    
+    if os.path.exists(best_model_path) and os.path.getsize(best_model_path) > 1000:
+        print(f"✅ Found validation-based training checkpoint: best_model.pth")
+        return best_model_path, 0  # Return 0 for iteration number (epoch-based training)
+    elif os.path.exists(latest_model_path) and os.path.getsize(latest_model_path) > 1000:
+        print(f"✅ Found validation-based training checkpoint: latest_model.pth")
+        return latest_model_path, 0
+    
+    # Fall back to iteration-based checkpoints (model-{iter}.pth)
     for file in os.listdir(model_dir):
         if file.startswith('model-') and file.endswith('.pth'):
             file_path = os.path.join(model_dir, file)
