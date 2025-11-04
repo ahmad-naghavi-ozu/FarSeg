@@ -2,6 +2,7 @@
 
 .idea
 dev
+_backup/
 tools/
 documents/
 apex/
