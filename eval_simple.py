@@ -6,9 +6,17 @@ Works with any dataset configuration and provides comprehensive metrics.
 
 import os
 import sys
+import warnings
 
 # Force unbuffered output for real-time progress bars
 os.environ['PYTHONUNBUFFERED'] = '1'
+
+# Suppress common warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='torch')
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', message='.*non-writable.*')
+warnings.filterwarnings('ignore', message='.*deprecated.*')
+
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader

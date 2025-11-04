@@ -17,6 +17,15 @@ MODEL_TYPE="farsegpp"
 NUM_CLASSES=2
 GPU_IDS="0"
 
+# Training parameters
+CLASS_VALUES="0,1"
+PATCH_SIZE=256
+STRIDE=128
+BATCH_SIZE_TRAIN=8
+BATCH_SIZE_VAL=1
+BASE_LR=0.007
+MAX_ITERS=150
+
 # Validation parameters
 LR_SCHEDULER="plateau"
 VALIDATION_INTERVAL_EPOCHS=1
@@ -43,15 +52,15 @@ echo ""
 echo "Step 1: Verifying dataset structure..."
 echo "============================================================================="
 
-if [ ! -d "${DATASET_PATH}/${DATASET_NAME}" ]; then
-    echo "❌ Dataset directory not found: ${DATASET_PATH}/${DATASET_NAME}"
+if [ ! -d "${DATA_ROOT}" ]; then
+    echo "❌ Dataset directory not found: ${DATA_ROOT}"
     exit 1
 fi
 
 echo "Checking dataset splits..."
 for SPLIT in train valid test; do
-    RGB_DIR="${DATASET_PATH}/${DATASET_NAME}/${SPLIT}/rgb"
-    SEM_DIR="${DATASET_PATH}/${DATASET_NAME}/${SPLIT}/sem"
+    RGB_DIR="${DATA_ROOT}/${SPLIT}/rgb"
+    SEM_DIR="${DATA_ROOT}/${SPLIT}/sem"
     
     if [ -d "$RGB_DIR" ] && [ -d "$SEM_DIR" ]; then
         RGB_COUNT=$(ls -1 "$RGB_DIR" | wc -l)
@@ -76,7 +85,7 @@ python generate_config.py \
     --dataset_name "$DATASET_NAME" \
     --num_classes "$NUM_CLASSES" \
     --class_values "$CLASS_VALUES" \
-    --data_root "$DATASET_PATH" \
+    --data_root "$(dirname "$DATA_ROOT")" \
     --patch_size "$PATCH_SIZE" \
     --stride "$STRIDE" \
     --batch_size_train "$BATCH_SIZE_TRAIN" \
@@ -186,21 +195,108 @@ else
     echo "  ⚠️  Training metrics NOT found"
 fi
 
+# Step 6: Run evaluation on test set
+echo ""
+echo "Step 6: Running evaluation on test set..."
+echo "============================================================================="
+
+PREDICTION_DIR="./predictions/${MODEL_TYPE}/${DATASET_NAME}"
+EVAL_LOG="${LOGS_DIR}/test_evaluation_${DATASET_NAME}_$(date '+%Y%m%d_%H%M%S').log"
+
+echo "Evaluating best model on test split..."
+echo "Output directory: $PREDICTION_DIR"
+echo ""
+
+EVAL_CMD="python eval_simple.py \
+    --config $CONFIG_FILE \
+    --model_dir $MODEL_DIR \
+    --output_dir $PREDICTION_DIR \
+    --gpu_ids 0 \
+    --force_predictions"
+
+if eval $EVAL_CMD 2>&1 | tee "$EVAL_LOG"; then
+    echo ""
+    echo "✅ Evaluation completed successfully!"
+else
+    echo ""
+    echo "❌ Evaluation failed! Check log: $EVAL_LOG"
+    exit 1
+fi
+
+# Step 7: Verify evaluation outputs
+echo ""
+echo "Step 7: Verifying evaluation outputs..."
+echo "============================================================================="
+
+echo "Checking for prediction files..."
+if [ -d "${PREDICTION_DIR}/predictions" ]; then
+    PRED_COUNT=$(ls -1 "${PREDICTION_DIR}/predictions" | wc -l)
+    echo "  ✅ Predictions directory found: $PRED_COUNT files"
+else
+    echo "  ❌ Predictions directory NOT found"
+fi
+
+if [ -f "${PREDICTION_DIR}/eval_results.json" ]; then
+    echo "  ✅ Evaluation results (JSON) found"
+elif [ -f "${PREDICTION_DIR}/eval_results.txt" ]; then
+    echo "  ✅ Evaluation results (TXT) found"
+else
+    echo "  ❌ Evaluation results NOT found"
+fi
+
+echo "Checking for visualizations..."
+if [ -f "${PREDICTION_DIR}/confusion_matrix.png" ]; then
+    echo "  ✅ Confusion matrix visualization found"
+else
+    echo "  ⚠️  Confusion matrix NOT found"
+fi
+
+if [ -d "${PREDICTION_DIR}/prediction_samples" ]; then
+    SAMPLE_COUNT=$(ls -1 "${PREDICTION_DIR}/prediction_samples" 2>/dev/null | wc -l)
+    echo "  ✅ Prediction samples directory found: $SAMPLE_COUNT samples"
+else
+    echo "  ⚠️  Prediction samples NOT found"
+fi
+
+# Display evaluation metrics
+echo ""
+echo "Evaluation Metrics Summary:"
+echo "============================================================================="
+if [ -f "${PREDICTION_DIR}/eval_results.txt" ]; then
+    cat "${PREDICTION_DIR}/eval_results.txt"
+elif [ -f "${PREDICTION_DIR}/eval_results.json" ]; then
+    python -c "
+import json
+with open('${PREDICTION_DIR}/eval_results.json') as f:
+    results = json.load(f)
+    print(f\"  Overall Accuracy: {results.get('overall_accuracy', 'N/A'):.4f}\")
+    print(f\"  Mean IoU: {results.get('mean_iou', 'N/A'):.4f}\")
+    if 'per_class_iou' in results:
+        print(f\"  Per-Class IoU:\")
+        for i, iou in enumerate(results['per_class_iou']):
+            print(f\"    Class {i}: {iou:.4f}\")
+"
+fi
+
 # Final summary
 echo ""
 echo "============================================================================="
-echo "🎉 Validation Training Test Completed!"
+echo "🎉 Validation Training Pipeline Test Completed!"
 echo "============================================================================="
 echo "Dataset: $DATASET_NAME"
 echo "Model: $MODEL_TYPE"
 echo "Config: $CONFIG_FILE"
 echo "Model dir: $MODEL_DIR"
-echo "Log file: $LOG_FILE"
+echo "Predictions: $PREDICTION_DIR"
 echo ""
-echo "Next steps:"
-echo "  1. Check training curves in: ${MODEL_DIR}/training_metrics.json"
-echo "  2. Evaluate best model:"
-echo "     python eval_simple.py --config $CONFIG_FILE \\"
-echo "       --ckpt_path ${MODEL_DIR}/best_model.pth \\"
-echo "       --output_dir ./predictions/${MODEL_TYPE}/${DATASET_NAME}"
+echo "Logs:"
+echo "  Training log: $LOG_FILE"
+echo "  Evaluation log: $EVAL_LOG"
+echo ""
+echo "Generated files:"
+echo "  ✓ Training metrics: ${MODEL_DIR}/training_metrics.json"
+echo "  ✓ Best model: ${MODEL_DIR}/best_model.pth"
+echo "  ✓ Predictions: ${PREDICTION_DIR}/predictions/"
+echo "  ✓ Evaluation results: ${PREDICTION_DIR}/eval_results.*"
+echo "  ✓ Visualizations: ${PREDICTION_DIR}/*.png"
 echo "============================================================================="

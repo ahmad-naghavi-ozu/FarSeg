@@ -7,6 +7,14 @@ Uses native PyTorch AMP for mixed precision training.
 import os
 import sys
 import glob
+import warnings
+
+# Suppress common warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='torch')
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', message='.*non-writable.*')
+warnings.filterwarnings('ignore', message='.*deprecated.*')
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
