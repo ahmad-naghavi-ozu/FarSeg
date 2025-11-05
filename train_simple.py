@@ -36,9 +36,15 @@ def load_config(config_path):
     return config_module.config
 
 def build_model(config):
-    """Build the FarSeg model from config."""
-    from module.farseg import FarSeg
-    return FarSeg(config['model']['params'])
+    """Build the FarSeg or FarSegPP model from config."""
+    model_type = config['model']['type']
+    
+    if model_type == 'FarSegPP':
+        from module.farsegpp import FarSegPP
+        return FarSegPP(config['model']['params'])
+    else:  # FarSeg
+        from module.farseg import FarSeg
+        return FarSeg(config['model']['params'])
 
 def custom_collate_fn(batch):
     """Custom collate function to handle variable-sized fg_cls_label tensors"""

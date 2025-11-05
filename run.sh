@@ -26,7 +26,7 @@ BACKBONE="resnet50"                            # Backbone: "resnet50", "mit_b2",
 PATCH_SIZE=256                                 # Input patch size (optimized for 512x512 images)
 STRIDE=128                                     # Patch stride for training (50% overlap)
 BATCH_SIZE_TRAIN=64                             # Training batch size (safe for 11GB GPU with FarSegPP)
-BATCH_SIZE_VAL=32                              # Validation batch size
+BATCH_SIZE_VAL=64                               # Validation batch size
 BASE_LR=0.007                                  # Base learning rate
 MAX_ITERS=60000                               # Maximum training iterations
 
